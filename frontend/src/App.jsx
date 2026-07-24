@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Activity, AlertTriangle, Search, BarChart2, Settings, Zap } from 'lucide-react';
+import { Shield, Activity, AlertTriangle, Search, BarChart2, Settings } from 'lucide-react';
 import Overview from './pages/Overview';
 import LiveFeed from './pages/LiveFeed';
 import AlertTriage from './pages/AlertTriage';
@@ -10,28 +10,56 @@ import SettingsPage from './pages/Settings';
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [wsEvents, setWsEvents] = useState([]);
-  const [liveMetrics, setLiveMetrics] = useState(null);
 
-  // Connect WebSocket for real-time live event streaming
+  // Resilient WebSocket Listener with Auto-Reconnect
   useEffect(() => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/api/events/stream`;
-    
     let ws;
-    try {
-      ws = new WebSocket(wsUrl);
-      ws.onmessage = (event) => {
-        const payload = JSON.parse(event.data);
-        if (payload.type === 'NEW_EVENT') {
-          setWsEvents((prev) => [payload.data, ...prev.slice(0, 199)]);
-        }
-      };
-    } catch (e) {
-      console.warn("WebSocket fallback", e);
+    let timer;
+
+    function connect() {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}/api/events/stream`;
+
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          console.log('[WebSocket Connected]');
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === 'NEW_EVENT') {
+              setWsEvents((prev) => [payload.data, ...prev.slice(0, 199)]);
+            } else if (payload.type === 'ATTACK_BURST_TRIGGERED') {
+              console.log('[Attack Burst Notification Received]');
+            }
+          } catch (err) {
+            console.error('WebSocket parse error', err);
+          }
+        };
+
+        ws.onclose = () => {
+          console.warn('[WebSocket Closed] Retrying in 3 seconds...');
+          timer = setTimeout(connect, 3000);
+        };
+
+        ws.onerror = (err) => {
+          console.error('[WebSocket Error]', err);
+          ws.close();
+        };
+      } catch (e) {
+        console.warn('WebSocket connection error', e);
+        timer = setTimeout(connect, 3000);
+      }
     }
+
+    connect();
 
     return () => {
       if (ws) ws.close();
+      if (timer) clearTimeout(timer);
     };
   }, []);
 

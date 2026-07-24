@@ -13,7 +13,8 @@ export default function EntityInvestigate() {
       .then((data) => {
         setEntities(data);
         if (data.length > 0) {
-          setSelectedEntityId(data[0].user_id);
+          const defaultEntity = data.find(e => e.user_id === 'USR_012') || data[0];
+          setSelectedEntityId(defaultEntity.user_id);
         }
       })
       .catch((err) => console.error(err));
@@ -68,11 +69,18 @@ export default function EntityInvestigate() {
               fontWeight: 600
             }}
           >
-            {entities.map((ent) => (
-              <option key={ent.user_id} value={ent.user_id}>
-                {ent.user_id} ({ent.role}) - {ent.alert_count} Alerts
-              </option>
-            ))}
+            {entities.map((ent) => {
+              let storyLabel = '';
+              if (ent.user_id === 'USR_012') storyLabel = ' ⭐ [DEMO VICTIM: IT-OT Crossover]';
+              else if (ent.user_id === 'USR_004') storyLabel = ' ⭐ [DEMO VICTIM: Dormant Reactivation]';
+              else if (ent.user_id === 'USR_001') storyLabel = ' 🟢 [NORMAL BASELINE]';
+
+              return (
+                <option key={ent.user_id} value={ent.user_id}>
+                  {ent.user_id} ({ent.role}){storyLabel} - {ent.alert_count} Alerts
+                </option>
+              );
+            })}
           </select>
         </div>
       </div>
