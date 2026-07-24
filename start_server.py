@@ -23,17 +23,17 @@ def main():
 
     # Optional rebuild step if requested or if dist directory missing
     if args.rebuild or not os.path.exists(dist_dir):
-        print("🔨 Building React frontend production bundle...")
+        print("[BUILD] Building React frontend production bundle...")
         build_cmd = "npx vite build" if os.name != "nt" else r".\node_modules\.bin\vite build"
         res = subprocess.run(build_cmd, cwd=frontend_dir, shell=True)
         if res.returncode != 0:
-            print("❌ Frontend build failed. Starting backend server only.")
+            print("[ERROR] Frontend build failed. Starting backend server only.")
         else:
-            print("✅ React frontend build complete.")
+            print("[SUCCESS] React frontend build complete.")
     else:
-        print("⚡ FAST COLD BOOT: Using pre-built frontend bundle in frontend/dist")
+        print("[FAST COLD BOOT] Using pre-built frontend bundle in frontend/dist")
 
-    print(f"\n🚀 Starting Honeywell Cyber Operations Console on http://localhost:{args.port}")
+    print(f"\n[STARTING] Honeywell Cyber Operations Console on http://localhost:{args.port}")
     print("Press Ctrl+C to stop the server.\n")
 
     # Automatically open browser
