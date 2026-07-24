@@ -1,0 +1,206 @@
+:root {
+  --bg-dark: #0E1117;
+  --bg-card: #161B26;
+  --bg-card-hover: #1E2536;
+  --border-color: #2E364F;
+  --text-main: #E0E6ED;
+  --text-muted: #8C9BAE;
+  
+  --hw-red: #EE3124;
+  --hw-red-dark: #3D0C11;
+  --hw-amber: #FFB400;
+  --hw-blue: #00A3E0;
+  --hw-green: #00C853;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+code, .mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-dark);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+/* Common Layout Components */
+.app-container {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 240px;
+  background-color: #111520;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+/* Cards & Containers */
+.card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.card-critical {
+  border-left: 4px solid var(--hw-red);
+  background: linear-gradient(135deg, var(--hw-red-dark) 0%, #161B26 100%);
+}
+
+.card-ot-alert {
+  border-left: 4px solid var(--hw-amber);
+  background: linear-gradient(135deg, #3D250C 0%, #161B26 100%);
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.badge-it {
+  background-color: rgba(0, 163, 224, 0.15);
+  color: var(--hw-blue);
+  border: 1px solid var(--hw-blue);
+}
+
+.badge-ot {
+  background-color: rgba(238, 49, 36, 0.15);
+  color: var(--hw-red);
+  border: 1px solid var(--hw-red);
+}
+
+.badge-critical {
+  background-color: var(--hw-red);
+  color: #FFF;
+}
+
+.badge-high {
+  background-color: var(--hw-amber);
+  color: #000;
+}
+
+.badge-status-new {
+  background-color: #3B82F6;
+  color: #FFF;
+}
+
+.badge-status-ack {
+  background-color: #10B981;
+  color: #FFF;
+}
+
+.badge-status-fp {
+  background-color: #6B7280;
+  color: #FFF;
+}
+
+.badge-status-esc {
+  background-color: #EF4444;
+  color: #FFF;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th {
+  background-color: #111520;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+td {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(46, 54, 79, 0.5);
+  font-size: 13px;
+}
+
+tr:hover {
+  background-color: var(--bg-card-hover);
+  cursor: pointer;
+}
+
+/* Buttons */
+.btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.btn-primary {
+  background-color: var(--hw-red);
+  color: white;
+}
+.btn-primary:hover {
+  background-color: #D6271A;
+}
+
+.btn-secondary {
+  background-color: #2E364F;
+  color: var(--text-main);
+}
+.btn-secondary:hover {
+  background-color: #3D486B;
+}
+
+.btn-success {
+  background-color: var(--hw-green);
+  color: white;
+}
+
+.btn-warning {
+  background-color: var(--hw-amber);
+  color: black;
+}

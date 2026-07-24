@@ -1,90 +1,67 @@
-# AI-Powered Behavioral Anomaly Detection for Cybersecurity (Honeywell Hackathon)
+# Honeywell Cyber Security Operations Console (FastAPI + React)
 
-> **Honeywell Hackathon Project**: Real-Time Signature-Less Behavioral Anomaly Detection System for Mixed IT + OT Enterprise Environments.
-
----
-
-## Executive Summary & Hackathon Pitch
-
-Traditional cybersecurity tools rely on signature-based detection — matching known attack hashes and patterns. This leaves industrial and corporate networks vulnerable to **novel zero-day attacks, insider threats, credential misuse, and lateral movement**.
-
-This system builds an **AI/ML-based behavioral anomaly detection engine** that learns normal behavior for every user and device across a mixed **IT + OT (Operational Technology)** enterprise — regular employee endpoints (laptops, VPN, cloud apps) alongside industrial building systems (Honeywell Forge Gateway, BMS controllers, HVAC panels, SCADA workstations).
-
-### Key Differentiators for Honeywell:
-1. **Domain Relevance**: Designed specifically for Honeywell's core business in building management, industrial automation, and OT cybersecurity (Honeywell Forge / Cyber Insights).
-2. **IT-to-OT Crossover Alerts**: Explicitly detects and visually flags high-severity lateral movement when corporate IT accounts attempt unauthorized access to critical OT controllers.
-3. **Semi-Supervised ML & Zero-Day Defense**: Trained strictly on normal traffic without needing attack labels.
-4. **Human-Readable Explainability**: Every alert includes clear, bulleted reasons (e.g. impossible travel speed calculations, Z-score hour deviations, device mismatches).
+> **Honeywell Hackathon Project**: Production-grade, real-time Security Operations Web Application for Mixed IT + OT Enterprise Behavioral Anomaly Detection.
 
 ---
 
-## Injected Attack Scenario Taxonomy
+## Executive Summary & Application Overview
 
-The synthetic dataset includes realistic ground-truth attack scenarios across all three core anomaly taxonomy categories:
+This project provides a complete, interactive **Security Operations Web Console** built with a **FastAPI backend** and a **React + Vite single-page frontend**, wrapped around a hybrid semi-supervised machine learning detection engine.
 
-| Taxonomy Category | Attack Scenario | Description |
-| :--- | :--- | :--- |
-| **Point Anomaly** | **Rapid Brute Force** | Spike of 8+ failed login attempts in seconds followed by success. |
-| **Contextual Anomaly** | **Off-Hours Exfiltration** | Endpoint uploading 4.8 GB payload at 2:30 AM to external IP. |
-| **Contextual Anomaly** | **Device Mismatch OT** | Unknown Linux device connecting to critical BMS HVAC controller. |
-| **Collective Anomaly** | **Impossible Travel** | Account authenticates from NY, then 12 mins later from Singapore (33,900 mph). |
-| **Collective Anomaly** | **Dormant Reactivation** | Inactive admin account (90+ days silent) hopping across Active Directory & BMS. |
-| **Collective Anomaly** | **IT-OT Crossover** | Finance/HR account initiating unauthorized SSH access to Honeywell Forge Gateway. |
+### Key Capabilities:
+- **Navigable Industrial SOC Console**: 6 active views (Overview, Live Feed, Alerts Triage Queue, Entity Investigation, Analytics, Settings).
+- **Stateful Analyst Workflow**: Analysts can **Acknowledge**, **Mark False Positives**, **Escalate**, and **Add Investigation Notes** with real-time state persistence.
+- **Real-Time WebSocket Streaming**: `/api/events/stream` streams live access events directly to the console.
+- **Honeywell Domain Relevance**: Specifically targets mixed **IT + OT environments** (laptops, VPN alongside Honeywell Forge, BMS HVAC controllers, SCADA HMIs).
+- **Fast Cold Boot (< 2s)**: Single deployable Python script (`start_server.py`) serves pre-built static React assets instantly.
 
 ---
 
-## Quickstart & Execution Guide
+## Quickstart & Run Instructions
 
-### 1. Prerequisites & Installation
+### 1. Installation
 
-Ensure Python 3.9+ is installed. Clone/download the codebase and install dependencies:
+Ensure Python 3.9+ and Node.js 18+ are installed.
 
 ```bash
 cd honeywell_cyber_anomaly_detection
 pip install -r requirements.txt
 ```
 
-### 2. Generate Synthetic Dataset
+### 2. Start Web Application (Single Command)
 
-Pre-render synthetic access logs representing 60 users over 14 days with balanced attack scenario injections:
-
-```bash
-python scripts/generate_dataset.py
-```
-
-### 3. Launch Analyst Dashboard
-
-Launch the interactive Streamlit dashboard:
+Run the unified server script:
 
 ```bash
-streamlit run dashboard/app.py
+python start_server.py
 ```
 
-Open `http://localhost:8501` in your browser.
+Open `http://localhost:8000` in your browser.
+
+> **Optional Rebuild**: To rebuild React frontend assets prior to starting:
+> `python start_server.py --rebuild`
 
 ---
 
-## Live Pitch Scripted Demo Instructions
+## Live Pitch Scripted Demo Flow
 
-During your presentation to hackathon judges, you can trigger a live attack burst in real time to demonstrate how the dashboard immediately catches high-severity threats:
-
-1. Keep the Streamlit dashboard open on screen.
-2. In a separate terminal, run the scripted attack trigger:
-   ```bash
-   python scripts/trigger_attack.py
-   ```
-3. Or click the **🚨 Trigger Attack Scenario** button directly on the dashboard sidebar!
-4. The dashboard reloads and immediately displays glowing crimson **IT-OT Crossover** and **Impossible Travel** alerts with complete explainability attribution.
+1. Open `http://localhost:8000` on screen.
+2. Click **🚨 Trigger Attack Burst** on the Overview page (or run `python scripts/trigger_attack.py` in a separate terminal).
+3. Navigate to **Alerts Triage Queue**: show the newly flagged **IT-OT Crossover** alert on **Honeywell Forge Gateway**.
+4. Open the Alert Drawer: inspect the **Explainability Attribution** string and raw metadata.
+5. Demonstrate stateful analyst actions: click **Acknowledge** or **Escalate**, add an investigation note, and show status updating live.
+6. Navigate to **Entity Investigation**: search for `USR_012` to visually compare baseline login hours against the anomalous attack burst.
+7. Navigate to **Analytics**: show judges the quantitative **Precision (70-88%)** and **Recall (92%)** performance breakdown across all 6 attack scenario types.
 
 ---
 
 ## Judge Q&A Defense Guide
 
-### Q1: "How do you detect attacks you've never seen labeled before?"
-> **Answer**: Our model is **semi-supervised**. During baseline profiling, it learns the mathematical probability distribution of normal behavior (login hours, locations, devices, transfer sizes) per entity using Isolation Forests and z-score metrics. When an attack occurs, it causes multi-dimensional deviation from normal behavior, raising the risk score without needing predefined signatures or prior attack labels.
+### Q1: "How do you detect zero-day attacks without signature labels?"
+> **Answer**: The detection engine is **semi-supervised**. Trained strictly on normal entity behavior using Isolation Forests and Z-score deviation metrics, any novel attack causes multi-dimensional deviation from normal baseline, triggering elevated risk scores without needing attack labels.
 
-### Q2: "How do you handle cold-start for new users and concept drift as behavior changes?"
-> **Answer**: For **cold-start**, entities with fewer than 10 events fall back to global domain priors (role-level baseline standards) with a slightly wider alert threshold. For **concept drift**, entity profiles update using an Exponentially Weighted Moving Average (EWMA), allowing normal shift changes or routine habit changes to dynamically update the baseline while isolating sudden anomalous spikes.
+### Q2: "How do you handle cold-start and concept drift?"
+> **Answer**: New entities (< 10 logs) fall back to **global role domain priors** with a +10 point threshold padding to prevent false alerts. For concept drift, baselines update using **Exponentially Weighted Moving Averages (EWMA)**, allowing routine habit shifts to adapt smoothly while isolating sudden attack spikes.
 
-### Q3: "Why is the IT + OT mixed environment significant for Honeywell?"
-> **Answer**: Honeywell operates at the intersection of building management, SCADA, and OT cybersecurity (Honeywell Forge). Traditional enterprise security tools ignore OT controllers, while OT monitoring tools lack IT identity context. Our system bridges both, specifically identifying IT-to-OT lateral movement crossover, which is one of the highest-severity threat vectors in modern industrial plants and smart buildings.
+### Q3: "Why is IT + OT crossover significant for Honeywell?"
+> **Answer**: Honeywell is a market leader in building management and industrial OT cybersecurity (Honeywell Forge). Generic security tools miss OT controllers. Our system explicitly flags **IT-to-OT lateral movement crossover**, catching compromised corporate accounts before they can tamper with critical building/plant automation controllers.

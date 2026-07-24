@@ -3,3 +3,4 @@ __pycache__/
 .streamlit/
 .env
 data/*.csv
+frontend/node_modules/

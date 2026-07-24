@@ -1,8 +1,8 @@
 # System Architecture & Technical Design
 
-## Honeywell AI-Powered Behavioral Anomaly Detection System
+## Honeywell AI-Powered Cyber Operations Console (FastAPI + React)
 
-This document details the architectural design, machine learning methodology, and domain decisions behind the **Honeywell AI-Powered Behavioral Anomaly Detection System** for mixed IT + OT enterprise environments.
+This document details the architectural design, machine learning methodology, and serving layer of the **Honeywell Cyber Operations Web Application** for mixed IT + OT enterprise environments.
 
 ---
 
@@ -10,11 +10,11 @@ This document details the architectural design, machine learning methodology, an
 
 ```mermaid
 flowchart TD
-    subgraph Data Layer & Synthetic Environment
-        A[Multi-Entity Log Generator] -->|Normal Traffic & Injected Scenarios| B[(Synthetic Stream CSV/JSONL)]
+    subgraph Data Layer & Synthetic Engine
+        A[Multi-Entity IT+OT Log Generator] -->|Normal Traffic & Injected Scenarios| B[(Synthetic Log Store CSV/JSONL)]
     end
 
-    subgraph Hybrid Detection Pipeline
+    subgraph Hybrid Detection Pipeline (Python Core Library)
         B --> C[Entity Baseline Profiler\nRolling EWMA & Cold-Start Priors]
         B --> D[Deterministic Rule Assist\nImpossible Travel & Brute Force]
         B --> E[Unsupervised ML Engine\nIsolation Forest & Feature Z-Scores]
@@ -27,64 +27,47 @@ flowchart TD
         F -->|Risk Score 0-100| H[SHAP/Z-Score Explainability Engine]
     end
 
-    subgraph Analyst Triage Dashboard (Streamlit)
-        G -->|Point / Contextual / Collective| I[Analyst Dashboard]
-        H -->|Human-Readable Reasoning| I
-        F -->|High Severity IT-OT Alerts| I
-        C -->|Entity Baseline Visualizer| I
+    subgraph Backend Serving Layer (FastAPI)
+        G --> I[FastAPI App Engine]
+        H --> I
+        I --> J[(Alert State & Action Store)]
+        I --> K[WebSocket Server\n/api/events/stream]
+        I --> L[REST APIs\nAlerts, Entities, Metrics, Settings]
+    end
+
+    subgraph Industrial SOC Frontend (React Single-Page App)
+        K -->|Real-Time Event Stream| M[React 18 Console]
+        L <-->|Stateful Analyst Actions| M
+        
+        subgraph Navigable Views
+            M --> N[1. Overview Dashboard & Sparkline]
+            M --> O[2. Live Event Feed]
+            M --> P[3. Alerts & Triage Queue\nAcknowledge / FP / Escalate / Notes]
+            M --> Q[4. Entity Investigation & Baselines]
+            M --> R[5. Analytics & Scenario Breakdown]
+            M --> S[6. Model Tuning & Dynamic Thresholds]
+        end
     end
 ```
 
 ---
 
-## Honeywell Domain Framing: IT + OT Crossover Security
+## Serving & State Management Architecture
 
-Unlike generic enterprise security tools that focus solely on corporate email or laptop logins, Honeywell's core business spans industrial automation, building management systems (BMS), and industrial cybersecurity (e.g., Honeywell Forge, Cyber Insights).
+1. **FastAPI Serving Engine (`backend/`)**:
+   - Wraps the detection pipeline and exposes asynchronous REST endpoints alongside a WebSocket streaming channel.
+   - Serves static pre-built React production bundle (`frontend/dist`) directly at `http://localhost:8000`.
 
-Our synthetic environment models a realistic **mixed IT + OT enterprise**:
-- **IT Domain Assets**: Laptops, Corporate VPN, Active Directory, Workday, GitHub, AWS Cloud.
-- **OT Domain Assets**: Honeywell Forge Gateway, BMS HVAC Controllers, SCADA HMIs, Building Access Control Gateways, Industrial PLCs.
+2. **Real-Time WebSocket Event Stream (`/api/events/stream`)**:
+   - Emits access log events in real time to connected analyst web clients without requiring HTTP polling.
 
-### High-Severity IT-to-OT Crossover Detection
-A critical attack vector in industrial cybersecurity occurs when an attacker compromises a standard IT corporate account (e.g., Finance or HR) and attempts lateral movement into OT control networks (e.g., accessing a BMS HVAC controller or SCADA workstation). Our hybrid pipeline explicitly flags IT-to-OT crossovers as high-severity alerts.
-
----
-
-## Machine Learning & Anomaly Taxonomy Design
-
-### 1. Semi-Supervised Anomaly Scoring
-To defend against zero-day threats and signature-less attacks, the machine learning engine is framed as **semi-supervised**:
-- **Training Phase**: The Isolation Forest and entity baseline statistics are trained **strictly on normal behavioral traffic**. No attack labels are seen during training.
-- **Detection Phase**: Incoming events are scored based on their mathematical deviation from the learned normal distribution.
-
-### 2. Anomaly Taxonomy Mapping
-Every flagged event is classified into one of three core anomaly taxonomy categories:
-- **Point Anomalies**: Single events that are inherently abnormal (e.g., rapid failed login bursts during brute-force attacks).
-- **Contextual Anomalies**: Events normal in isolation but abnormal given context (e.g., off-hours 4.8 GB exfiltration or unrecognized Linux devices connecting to OT controllers).
-- **Collective Anomalies**: Sequences of events that are suspicious together (e.g., impossible travel across 6,000 miles in 12 minutes, or dormant account reactivation across IT and OT systems).
+3. **Stateful Analyst Triage Store (`backend/store.py`)**:
+   - Tracks analyst triage decisions (**ACKNOWLEDGED**, **FALSE_POSITIVE**, **ESCALATED**) and timestamped investigation notes, persisting state immediately across UI interactions.
 
 ---
 
-## Solutions to Key ML Challenges
+## Machine Learning & Honeywell Domain Rationale
 
-### 1. Cold-Start Problem (New Users/Devices)
-- **Challenge**: New entities have no historical log data to build a baseline.
-- **Solution**: When an entity has `< 10` historical events, the system falls back to **global domain priors** (standard working hour means and transfer sizes for IT vs OT roles) and widens the alert threshold (+10 points) to avoid false positives until the entity profile matures.
-
-### 2. Concept Drift (Evolving Normal Behavior)
-- **Challenge**: User behavior naturally changes over time (e.g., shift schedule changes, new project assignments).
-- **Solution**: Entity baselines update using an **Exponentially Weighted Moving Average (EWMA)** with a decay factor ($\alpha = 0.1$). Older behaviors decay while recent normal interactions dynamically update the baseline mean and variance.
-
-### 3. Class Imbalance (Rare Attack Events)
-- **Challenge**: Attacks constitute `< 5%` of total log volume; models risk collapsing to "everything is normal."
-- **Solution**: Isolation Forest contamination parameter is set to $0.04$, and risk scores are normalized to a $0-100$ continuous scale with dynamic thresholding to maintain high recall on rare events without inflating false positives.
-
----
-
-## Explainability Engine (SHAP & Z-Score Feature Attribution)
-
-For every alert raised on the dashboard, the explainability engine outputs clear bulleted text explaining *why* the score was elevated:
-- `⚡ IMPOSSIBLE TRAVEL: Traveled 6,780 miles at calculated speed of 33,900 mph`
-- `⚠️ IT-OT CROSSOVER: IT Role (Finance_Manager) accessed critical OT Asset 'Honeywell_Forge_Gateway'`
-- `🕒 UNUSUAL TIME: Access at 02:30 AM (historical avg: 09:15 AM ± 1.2 hrs)`
-- `📦 HIGH DATA VOLUME: 4,800 MB transferred (historical entity baseline: 45.0 MB)`
+- **Semi-Supervised Anomaly Scoring**: Isolation Forest models trained strictly on normal traffic distributions enable signature-less zero-day threat detection.
+- **Cold-Start & Concept Drift**: Role domain priors handle cold-start entities (< 10 logs), while EWMA rolling baselines adjust for natural habit evolution.
+- **IT-to-OT Crossover Alerts**: Explicitly flags corporate IT accounts attempting unauthorized access to critical OT controllers (Honeywell Forge, BMS, SCADA), highlighting industrial cybersecurity value for Honeywell.
