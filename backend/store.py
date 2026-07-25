@@ -1,13 +1,16 @@
 """
-Stateful Alert & Security Operations Data Store.
-Tracks analyzed events, alerts, analyst workflow actions (Acknowledge, FP, Escalate, Notes),
-and dynamic alert threshold settings.
+Stateful Data Store & Detection Pipeline Coordinator.
+Enforces structural label leakage prevention at the inference boundary,
+coordinates baseline profiling, sequence modeling, cold-start blending, concept drift adaptation,
+and calculates official evaluation metrics including Top-1% Analyst Alert Budget metrics.
 """
 
 import os
 import sys
+import math
 from datetime import datetime
 import pandas as pd
+import numpy as np
 from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
 
 # Ensure parent directory is in sys.path
@@ -15,6 +18,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from data_gen.generator import SyntheticLogGenerator
 from detection.baseline import EntityBaselineProfiler
+from detection.cold_start import ColdStartManager
+from detection.sequence_model import SequenceAnomalyDetector
 from detection.rule_engine import RuleAssistEngine
 from detection.ml_detector import MLAnomalyDetector
 from detection.risk_fusion import RiskFusionEngine
@@ -25,7 +30,8 @@ class DataStore:
     def __init__(self):
         self.raw_df = None
         self.analyzed_events = []
-        self.alert_states = {}  # alert_id -> {status, notes, timestamp}
+        self.ground_truth_labels = {}  # event_id -> true_label
+        self.alert_states = {}         # alert_id -> {status, notes}
         self.current_threshold = 60.0
         self.load_and_process_data()
 
@@ -34,9 +40,8 @@ class DataStore:
         if os.path.exists(data_path):
             self.raw_df = pd.read_csv(data_path)
         else:
-            gen = SyntheticLogGenerator(num_users=50, num_days=14)
-            raw_df = gen.generate_logs(target_events=1000)
-            self.raw_df = gen.inject_attack_scenarios(raw_df)
+            gen = SyntheticLogGenerator(num_entities=50, num_days=14, anomaly_rate=0.015)
+            self.raw_df = gen.generate_dataset(total_sessions=1500)
             os.makedirs(os.path.dirname(data_path), exist_ok=True)
             self.raw_df.to_csv(data_path, index=False)
 
@@ -44,80 +49,117 @@ class DataStore:
 
     def _run_pipeline(self):
         profiler = EntityBaselineProfiler()
+        cold_start = ColdStartManager(min_events_threshold=10)
+        sequence_detector = SequenceAnomalyDetector(min_cohort_events=10)
         rule_engine = RuleAssistEngine()
-        ml_detector = MLAnomalyDetector()
+        ml_detector = MLAnomalyDetector(contamination=0.02)
         risk_fusion = RiskFusionEngine(base_alert_threshold=self.current_threshold)
         classifier = AnomalyClassifier()
         explainer = ExplainabilityEngine()
 
-        events = self.raw_df.to_dict("records")
-        ml_detector.fit_normal_baseline(events[:300], profiler)
+        events_raw = self.raw_df.to_dict("records")
+        
+        # Pre-train baseline & sequence models strictly on initial normal events
+        normal_train_split = [e for e in events_raw[:300] if e.get("label", "normal") == "normal"]
+        ml_detector.fit_normal_baseline(events_raw[:300], profiler)
+        sequence_detector.fit_normal_baseline(normal_train_split)
 
         self.analyzed_events = []
-        
-        for idx, ev in enumerate(events):
-            user_id = ev["user_id"]
-            user_domain = ev.get("domain", "IT")
-            
-            baseline_stats = profiler.get_baseline_stats(user_id, user_domain)
-            rule_signals = rule_engine.evaluate_rules(ev, baseline_stats)
-            feat_vec = ml_detector.extract_features(ev, baseline_stats)
-            ml_score = ml_detector.predict_raw_score(feat_vec)
-            
-            risk_score, severity, dynamic_thresh = risk_fusion.fuse_risk_score(ev, rule_signals, ml_score, baseline_stats)
-            tax_cat, attack_cat = classifier.classify_anomaly(ev, rule_signals, feat_vec, baseline_stats)
-            reason = explainer.generate_explanation(ev, rule_signals, feat_vec, baseline_stats, attack_cat)
-            
-            profiler.update_profile(ev)
-            
-            is_alert = risk_score >= self.current_threshold
+        self.ground_truth_labels = {}
+
+        for idx, ev in enumerate(events_raw):
             alert_id = f"ALT-{idx+1:04d}"
             
-            # Maintain analyst workflow state if previously modified
+            # --- STRUCTURAL LABEL LEAKAGE PREVENTION ---
+            # Extract ground truth label for evaluation ONLY
+            true_label = str(ev.get("label", "normal"))
+            self.ground_truth_labels[alert_id] = true_label
+            
+            # Strip/drop 'label' field completely before passing into inference pipeline
+            ev_inference = {k: v for k, v in ev.items() if k != "label"}
+            assert "label" not in ev_inference, "LABEL LEAKAGE DETECTED at pipeline entry point!"
+            # -------------------------------------------
+
+            entity_id = ev_inference["entity_id"]
+            entity_type = ev_inference.get("entity_type", "user")
+
+            # 1. Baseline & Cold Start Profiling
+            personal_profile = profiler.get_profile(entity_id)
+            effective_baseline = cold_start.get_effective_baseline(entity_id, entity_type, personal_profile)
+
+            # 2. Rule Evaluation
+            rule_signals = rule_engine.evaluate_rules(ev_inference, effective_baseline)
+
+            # 3. ML Feature Extraction & Scoring
+            feat_vec = ml_detector.extract_features(ev_inference, effective_baseline)
+            ml_score = ml_detector.predict_raw_score(feat_vec)
+
+            # 4. Sequence Anomaly Scoring (Deliverable #3)
+            sequence_score = sequence_detector.calculate_sequence_score(ev_inference, personal_profile)
+
+            # 5. Risk Score Fusion
+            risk_score, severity, dynamic_thresh = risk_fusion.fuse_risk_score(
+                ev_inference, rule_signals, ml_score, sequence_score, effective_baseline
+            )
+
+            # 6. Attack Classification (Stage 2)
+            tax_cat, attack_cat = classifier.classify_anomaly(
+                ev_inference, rule_signals, feat_vec, sequence_score, effective_baseline, risk_score
+            )
+
+            # 7. Explainability Attribution (Deliverable #5)
+            reason = explainer.generate_explanation(
+                ev_inference, rule_signals, feat_vec, sequence_score, effective_baseline, tax_cat
+            )
+
+            # 8. Anti-Poisoning Concept Drift & Sequence Transition Updates
+            profiler.update_profile(ev_inference, inferred_risk_score=risk_score)
+            sequence_detector.update_transitions_online(ev_inference, inferred_risk_score=risk_score)
+
+            is_alert = (risk_score >= self.current_threshold and tax_cat != "normal" and tax_cat != "insider_drift")
+            
             existing_state = self.alert_states.get(alert_id, {
                 "status": "NEW",
                 "notes": []
             })
-            
+
             res = {
-                "id": str(alert_id),
+                "id": alert_id,
                 "event_index": int(idx),
-                "timestamp": str(ev["timestamp"]),
-                "user_id": str(ev["user_id"]),
-                "role": str(ev["role"]),
-                "domain": str(ev["domain"]),
-                "target_resource": str(ev["target_resource"]),
-                "asset_domain": str(ev["asset_domain"]),
-                "ip_address": str(ev["ip_address"]),
-                "latitude": float(ev["latitude"]),
-                "longitude": float(ev["longitude"]),
-                "location_name": str(ev["location_name"]),
-                "device_id": str(ev["device_id"]),
-                "mb_transferred": float(ev["mb_transferred"]),
-                "auth_result": str(ev["auth_result"]),
-                "is_attack": bool(ev["is_attack"]),
-                "attack_type": str(ev["attack_type"]),
-                "taxonomy": str(ev["taxonomy"]),
+                "timestamp": str(ev_inference["timestamp"]),
+                "entity_id": str(ev_inference["entity_id"]),
+                "entity_type": str(ev_inference["entity_type"]),
+                "role": str(ev_inference.get("role", "Unknown")),
+                "domain": str(ev_inference.get("domain", "IT")),
+                "source_ip": str(ev_inference["source_ip"]),
+                "geo_location": str(ev_inference["geo_location"]),
+                "resource_accessed": str(ev_inference["resource_accessed"]),
+                "auth_method": str(ev_inference["auth_method"]),
+                "session_duration": int(ev_inference["session_duration"]),
+                "command_sequence": str(ev_inference["command_sequence"]),
+                "device_fingerprint": str(ev_inference["device_fingerprint"]),
+                "mb_transferred": float(ev_inference.get("mb_transferred", 0.0)),
                 "risk_score": float(risk_score),
                 "severity": str(severity),
                 "is_alert": bool(is_alert),
-                "predicted_taxonomy": str(tax_cat if is_alert else "Normal"),
-                "predicted_attack_type": str(attack_cat if is_alert else "None"),
-                "explanation": str(reason if is_alert else "Normal activity."),
+                "predicted_taxonomy": str(attack_cat if is_alert or tax_cat == "insider_drift" else "Normal Baseline"),
+                "predicted_attack_type": str(tax_cat),
+                "explanation": str(reason),
+                "baseline_type": str(effective_baseline["baseline_type"]),
+                "weight_personal": float(effective_baseline["weight_personal"]),
                 "status": str(existing_state["status"]),
                 "notes": list(existing_state["notes"])
             }
-            
+
             self.analyzed_events.append(res)
             self.alert_states[alert_id] = existing_state
 
     def update_threshold(self, new_threshold: float):
         self.current_threshold = new_threshold
         for ev in self.analyzed_events:
-            ev["is_alert"] = ev["risk_score"] >= self.current_threshold
+            ev["is_alert"] = (ev["risk_score"] >= self.current_threshold and ev["predicted_attack_type"] not in ["normal", "insider_drift"])
 
     def perform_action(self, alert_id: str, action_type: str, note_text: str = None):
-        """Performs analyst triage action and persists state."""
         if alert_id not in self.alert_states:
             return None
         
@@ -128,12 +170,11 @@ class DataStore:
             state["status"] = "FALSE_POSITIVE"
         elif action_type == "ESCALATE":
             state["status"] = "ESCALATED"
-            
+
         if note_text:
             ts = datetime.now().strftime("%Y-%m-%d %H:%M")
             state["notes"].append(f"[{ts}] {note_text}")
 
-        # Update event record in memory
         for ev in self.analyzed_events:
             if ev["id"] == alert_id:
                 ev["status"] = state["status"]
@@ -143,18 +184,15 @@ class DataStore:
 
     def get_overview_metrics(self):
         alerts = [e for e in self.analyzed_events if e["is_alert"]]
-        it_alerts = [a for a in alerts if a["asset_domain"] == "IT"]
-        ot_alerts = [a for a in alerts if a["asset_domain"] == "OT"]
-        crossovers = [a for a in alerts if a["predicted_attack_type"] == "IT-OT Crossover"]
+        malicious_labels = ["brute_force", "impossible_travel", "credential_stuffing", "lateral_movement", "device_spoofing", "low_and_slow_exfiltration"]
         
-        y_true = [int(e["is_attack"]) for e in self.analyzed_events]
-        y_pred = [int(e["is_alert"]) for e in self.analyzed_events]
-        
-        p = precision_score(y_true, y_pred) if any(y_pred) else 0.0
-        r = recall_score(y_true, y_pred) if any(y_true) else 0.0
-        f1 = f1_score(y_true, y_pred) if any(y_pred) else 0.0
+        y_true = [1 if self.ground_truth_labels[e["id"]] in malicious_labels else 0 for e in self.analyzed_events]
+        y_pred = [1 if e["is_alert"] else 0 for e in self.analyzed_events]
 
-        # Time series sparkline data (count per day/time window)
+        p = float(precision_score(y_true, y_pred) * 100) if any(y_pred) else 0.0
+        r = float(recall_score(y_true, y_pred) * 100) if any(y_true) else 0.0
+        f1 = float(f1_score(y_true, y_pred)) if any(y_pred) else 0.0
+
         df = pd.DataFrame(self.analyzed_events)
         df["date"] = df["timestamp"].apply(lambda x: str(x).split(" ")[0])
         time_series = df.groupby("date")["is_alert"].sum().to_dict()
@@ -162,39 +200,62 @@ class DataStore:
         return {
             "total_events": len(self.analyzed_events),
             "active_alerts": len(alerts),
-            "it_alerts_count": len(it_alerts),
-            "ot_alerts_count": len(ot_alerts),
-            "crossover_alerts_count": len(crossovers),
-            "precision": round(float(p * 100), 1),
-            "recall": round(float(r * 100), 1),
-            "f1_score": round(float(f1), 3),
+            "it_alerts_count": sum(1 for a in alerts if a["domain"] == "IT"),
+            "ot_alerts_count": sum(1 for a in alerts if a["domain"] == "OT"),
+            "crossover_alerts_count": sum(1 for a in alerts if a["predicted_attack_type"] == "lateral_movement"),
+            "precision": round(p, 1),
+            "recall": round(r, 1),
+            "f1_score": round(f1, 3),
             "alert_volume_timeseries": time_series,
             "current_threshold": self.current_threshold
         }
 
     def get_evaluation_metrics(self):
-        y_true = [int(e["is_attack"]) for e in self.analyzed_events]
-        y_pred = [int(e["is_alert"]) for e in self.analyzed_events]
+        """
+        Computes overall metrics + Top-1% Analyst Alert Budget Metrics (Evaluation Criterion #3).
+        """
+        malicious_labels = ["brute_force", "impossible_travel", "credential_stuffing", "lateral_movement", "device_spoofing", "low_and_slow_exfiltration"]
         
+        y_true = [1 if self.ground_truth_labels[e["id"]] in malicious_labels else 0 for e in self.analyzed_events]
+        y_pred = [1 if e["is_alert"] else 0 for e in self.analyzed_events]
+
         cm = confusion_matrix(y_true, y_pred)
         tn, fp, fn, tp = [int(x) for x in cm.ravel()]
-        
+
         p = float(precision_score(y_true, y_pred) * 100) if any(y_pred) else 0.0
         r = float(recall_score(y_true, y_pred) * 100) if any(y_true) else 0.0
         f1 = float(f1_score(y_true, y_pred)) if any(y_pred) else 0.0
+
+        # --- EVALUATION CRITERION #3: TOP-1% ANALYST ALERT BUDGET METRIC ---
+        N = len(self.analyzed_events)
+        k_top1 = max(1, math.ceil(N * 0.01))
         
-        # Per scenario performance breakdown
-        scenarios = ["Impossible Travel", "Off-Hours Exfiltration", "Dormant Account Reactivation", "Device Mismatch OT", "Brute Force", "IT-OT Crossover"]
+        # Sort all events descending by risk_score
+        sorted_events = sorted(self.analyzed_events, key=lambda x: x["risk_score"], reverse=True)
+        top1_slice = sorted_events[:k_top1]
+        
+        top1_y_true = [1 if self.ground_truth_labels[e["id"]] in malicious_labels else 0 for e in top1_slice]
+        top1_tp = sum(top1_y_true)
+        top1_fp = k_top1 - top1_tp
+        
+        total_malicious = sum(y_true)
+        total_benign = N - total_malicious
+        
+        top1_precision = (top1_tp / k_top1 * 100.0) if k_top1 > 0 else 0.0
+        top1_recall = (top1_tp / total_malicious * 100.0) if total_malicious > 0 else 0.0
+        top1_fpr = (top1_fp / total_benign * 100.0) if total_benign > 0 else 0.0
+        # ------------------------------------------------------------------
+
+        # Per scenario performance breakdown across official taxonomy
+        scenarios = ["brute_force", "impossible_travel", "credential_stuffing", "lateral_movement", "device_spoofing", "low_and_slow_exfiltration"]
         breakdown = []
-        
+
         for sc in scenarios:
-            sc_events = [e for e in self.analyzed_events if e.get("attack_type") == sc or e.get("predicted_attack_type") == sc]
+            sc_events = [e for e in self.analyzed_events if self.ground_truth_labels[e["id"]] == sc]
             if sc_events:
-                sc_true = [int(e["is_attack"]) for e in sc_events]
-                sc_pred = [int(e["is_alert"]) for e in sc_events]
-                sc_tp = sum(1 for t, p in zip(sc_true, sc_pred) if t == 1 and p == 1)
-                sc_total = sum(sc_true)
-                sc_rec = (sc_tp / sc_total * 100) if sc_total > 0 else 100.0
+                sc_tp = sum(1 for e in sc_events if e["is_alert"])
+                sc_total = len(sc_events)
+                sc_rec = (sc_tp / sc_total * 100.0) if sc_total > 0 else 100.0
                 breakdown.append({
                     "scenario": sc,
                     "total_injected": int(sc_total),
@@ -207,6 +268,12 @@ class DataStore:
             "precision": round(p, 1),
             "recall": round(r, 1),
             "f1_score": round(f1, 4),
+            "top1_alert_budget": {
+                "budget_k": int(k_top1),
+                "precision_at_1pct": round(float(top1_precision), 1),
+                "recall_at_1pct": round(float(top1_recall), 1),
+                "fpr_at_1pct": round(float(top1_fpr), 2)
+            },
             "scenario_breakdown": breakdown
         }
 

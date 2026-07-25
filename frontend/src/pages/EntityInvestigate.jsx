@@ -102,9 +102,11 @@ export default function EntityInvestigate() {
           </div>
         </div>
         <div>
-          <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>RAISED ALERTS</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: entityData.alert_count > 0 ? 'var(--hw-red)' : 'var(--hw-green)' }}>
-            {entityData.alert_count} Alerts
+          <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>PROFILING BASELINE STRATEGY</div>
+          <div style={{ marginTop: 4 }}>
+            <span className="badge" style={{ backgroundColor: entityData.baseline_type === 'cohort' ? 'var(--hw-amber)' : 'var(--hw-blue)', color: '#000' }}>
+              {entityData.baseline_type ? entityData.baseline_type.toUpperCase() + ' BASELINE' : 'PERSONAL BASELINE'}
+            </span>
           </div>
         </div>
       </div>

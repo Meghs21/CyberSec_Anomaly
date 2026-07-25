@@ -1,25 +1,43 @@
 """
-Synthetic Access Log Generator for Honeywell Mixed IT + OT Enterprise.
-Generates realistic multi-day normal behavioral logs and injects explicit, labeled cyber attack scenarios.
+Official Synthetic Access Log Generator for Honeywell IT + OT Mixed Enterprise.
+Generates multi-entity behavioral logs matching the exact 11-field official schema:
+1. entity_id
+2. entity_type (user / service_account / edge_device)
+3. timestamp
+4. source_ip
+5. geo_location
+6. resource_accessed
+7. auth_method
+8. session_duration
+9. command_sequence
+10. device_fingerprint
+11. label (hidden at inference time)
+
+Supports extreme class imbalance (0.5% - 3.0% anomaly rate) across 6 malicious attack categories
+and 1 non-malicious behavioral drift edge case (insider_drift).
 """
 
 import random
+import json
 import math
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 
-# Configuration constants
+# Entity Types
+ENTITY_TYPES = ["user", "service_account", "edge_device"]
+
+# Roles & Domain Mappings
 ROLES = {
-    "IT_Analyst": {"domain": "IT", "start_hour": 9, "end_hour": 17, "base_mb": (10, 150)},
-    "Software_Engineer": {"domain": "IT", "start_hour": 10, "end_hour": 18, "base_mb": (50, 400)},
-    "HR_Specialist": {"domain": "IT", "start_hour": 8, "end_hour": 16, "base_mb": (5, 50)},
-    "Finance_Manager": {"domain": "IT", "start_hour": 8, "end_hour": 17, "base_mb": (10, 80)},
-    "BMS_Operator": {"domain": "OT", "start_hour": 7, "end_hour": 19, "base_mb": (20, 250)},
-    "HVAC_Engineer": {"domain": "OT", "start_hour": 8, "end_hour": 17, "base_mb": (15, 200)},
-    "SCADA_Specialist": {"domain": "OT", "start_hour": 6, "end_hour": 18, "base_mb": (30, 500)},
-    "Facilities_Tech": {"domain": "OT", "start_hour": 7, "end_hour": 16, "base_mb": (10, 100)},
-    "Domain_Admin": {"domain": "IT", "start_hour": 8, "end_hour": 18, "base_mb": (100, 800)},
+    "IT_Analyst": {"entity_type": "user", "domain": "IT", "start_hour": 9, "end_hour": 17, "auth": "password"},
+    "Software_Engineer": {"entity_type": "user", "domain": "IT", "start_hour": 10, "end_hour": 18, "auth": "token"},
+    "HR_Specialist": {"entity_type": "user", "domain": "IT", "start_hour": 8, "end_hour": 16, "auth": "password"},
+    "Finance_Manager": {"entity_type": "user", "domain": "IT", "start_hour": 8, "end_hour": 17, "auth": "biometric"},
+    "BMS_Operator": {"entity_type": "user", "domain": "OT", "start_hour": 7, "end_hour": 19, "auth": "certificate"},
+    "HVAC_Engineer": {"entity_type": "user", "domain": "OT", "start_hour": 8, "end_hour": 17, "auth": "certificate"},
+    "SCADA_Specialist": {"entity_type": "user", "domain": "OT", "start_hour": 6, "end_hour": 18, "auth": "certificate"},
+    "Forge_Sync_Service": {"entity_type": "service_account", "domain": "OT", "start_hour": 0, "end_hour": 23, "auth": "token"},
+    "BMS_HVAC_Gateway_01": {"entity_type": "edge_device", "domain": "OT", "start_hour": 0, "end_hour": 23, "auth": "certificate"},
 }
 
 IT_RESOURCES = ["Corporate_VPN", "Active_Directory", "Workday", "GitHub_Enterprise", "AWS_Console", "Jira_Cloud"]
@@ -34,14 +52,24 @@ GEO_LOCATIONS = {
     "Singapore_Facility": {"lat": 1.3521, "lon": 103.8198, "ip_prefix": "192.168.90."}
 }
 
-DEVICES = [
-    "Corporate-MacBook-Pro", "Windows-11-Enterprise-Workstation",
-    "Honeywell-Toughbook-Field-Laptop", "Linux-Engineering-Workstation", "Mobile-iOS-Corporate"
+DEVICE_FINGERPRINTS = {
+    "MacBook-Pro": "macOS 14.2 | MAC: a4:83:e7:91:02:11 | Protocol: HTTPS/TLS1.3",
+    "Windows-Workstation": "Windows 11 Enterprise | MAC: 00:1a:2b:3c:4d:5e | Protocol: RDP/SSH",
+    "Honeywell-Toughbook": "Windows 10 IoT | MAC: 70:85:c2:14:99:aa | Protocol: Modbus/BACnet",
+    "Linux-SCADA-HMI": "Ubuntu 22.04 LTS | MAC: 08:00:27:11:22:33 | Protocol: OPC-UA",
+    "Edge-Gateway-Firmware": "Honeywell-Firmware v3.4 | MAC: 90:b1:1c:00:44:fe | Protocol: MQTT/TLS"
+}
+
+NORMAL_COMMAND_SEQUENCES = [
+    "login -> authenticate -> select_dashboard -> view_logs -> logout",
+    "connect_vpn -> fetch_repo -> git_pull -> build_code -> disconnect",
+    "modbus_read -> check_temperature -> setpoint_verify -> log_telemetry",
+    "ssh_connect -> check_service_status -> update_config -> service_restart -> exit",
+    "token_auth -> sync_telemetry_batch -> push_forge_cloud -> close_session"
 ]
 
-def haversine_distance_miles(lat1, lon1, lat2, lon2):
-    """Calculates geographical distance in miles between two lat/lon pairs."""
-    R = 3958.8  # Earth radius in miles
+def haversine_miles(lat1, lon1, lat2, lon2):
+    R = 3958.8
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
@@ -49,308 +77,279 @@ def haversine_distance_miles(lat1, lon1, lat2, lon2):
     return R * c
 
 class SyntheticLogGenerator:
-    def __init__(self, num_users=50, num_days=14, seed=42):
+    def __init__(self, num_entities=50, num_days=14, anomaly_rate=0.015, seed=42):
+        assert 0.005 <= anomaly_rate <= 0.03, f"Anomaly rate must be between 0.5% and 3.0%, got {anomaly_rate}"
         random.seed(seed)
         np.random.seed(seed)
-        self.num_users = num_users
+        self.num_entities = num_entities
         self.num_days = num_days
-        self.users = self._create_user_profiles()
+        self.anomaly_rate = anomaly_rate
+        self.entities = self._create_entity_profiles()
 
-    def _create_user_profiles(self):
-        users = []
+    def _create_entity_profiles(self):
+        entities = []
         role_keys = list(ROLES.keys())
         loc_keys = list(GEO_LOCATIONS.keys())
-        
-        for i in range(1, self.num_users + 1):
-            user_id = f"USR_{i:03d}"
+        fp_keys = list(DEVICE_FINGERPRINTS.keys())
+
+        for i in range(1, self.num_entities + 1):
+            entity_id = f"USR_{i:03d}" if i <= 40 else f"DEV_{i:03d}"
             role = role_keys[(i - 1) % len(role_keys)]
             role_meta = ROLES[role]
             home_loc = loc_keys[(i - 1) % len(loc_keys)]
-            device = DEVICES[(i - 1) % len(DEVICES)]
-            
-            users.append({
-                "user_id": user_id,
+            fp_name = fp_keys[(i - 1) % len(fp_keys)]
+
+            entities.append({
+                "entity_id": entity_id,
+                "entity_type": role_meta["entity_type"],
                 "role": role,
                 "domain": role_meta["domain"],
                 "start_hour": role_meta["start_hour"],
                 "end_hour": role_meta["end_hour"],
-                "base_mb": role_meta["base_mb"],
                 "home_location": home_loc,
                 "lat": GEO_LOCATIONS[home_loc]["lat"],
                 "lon": GEO_LOCATIONS[home_loc]["lon"],
                 "ip_prefix": GEO_LOCATIONS[home_loc]["ip_prefix"],
-                "primary_device": device,
-                "dormant": False
+                "auth_method": role_meta["auth"],
+                "device_fingerprint": DEVICE_FINGERPRINTS[fp_name],
+                "fp_name": fp_name,
+                "allowed_resources": OT_RESOURCES if role_meta["domain"] == "OT" else IT_RESOURCES
             })
-        
-        # Mark 2 admin/engineering users as dormant (90+ days inactive baseline)
-        users[3]["dormant"] = True
-        users[7]["dormant"] = True
-        return users
+        return entities
 
-    def generate_logs(self, target_events=1200):
-        """Generates raw normal access logs over the simulated timeframe."""
-        start_time = datetime.now() - timedelta(days=self.num_days)
+    def generate_dataset(self, total_sessions=2000):
+        start_dt = datetime.now() - timedelta(days=self.num_days)
         events = []
-        
-        current_time = start_time
-        events_created = 0
-        
-        while events_created < target_events:
-            # Pick a random active user
-            active_users = [u for u in self.users if not u["dormant"]]
-            user = random.choice(active_users)
-            
-            # Timestamp with gaussian variation around working hours
-            hour = int(np.random.normal(loc=(user["start_hour"] + user["end_hour"])/2, scale=2.5)) % 24
+
+        # Target anomaly counts based on anomaly_rate (0.5% - 3.0%)
+        num_anomalies = max(10, int(total_sessions * self.anomaly_rate))
+        num_normal = total_sessions - num_anomalies
+
+        # 1. Generate Normal Sessions
+        current_time = start_dt
+        for _ in range(num_normal):
+            entity = random.choice(self.entities)
+            hour = int(np.random.normal(loc=(entity["start_hour"] + entity["end_hour"]) / 2, scale=2.0)) % 24
             minute = random.randint(0, 59)
             second = random.randint(0, 59)
-            
             event_dt = current_time.replace(hour=hour, minute=minute, second=second)
-            
-            # Determine target resource based on user domain (mostly domain match)
-            if user["domain"] == "OT":
-                target_resource = random.choice(OT_RESOURCES if random.random() < 0.85 else IT_RESOURCES)
-                asset_domain = "OT" if target_resource in OT_RESOURCES else "IT"
-            else:
-                target_resource = random.choice(IT_RESOURCES if random.random() < 0.95 else OT_RESOURCES)
-                asset_domain = "IT" if target_resource in IT_RESOURCES else "OT"
-                
-            ip_addr = f"{user['ip_prefix']}{random.randint(1, 254)}.{random.randint(1, 254)}"
-            mb_transferred = round(random.uniform(user["base_mb"][0], user["base_mb"][1]), 2)
-            
+
+            resource = random.choice(entity["allowed_resources"])
+            ip = f"{entity['ip_prefix']}{random.randint(1, 254)}.{random.randint(1, 254)}"
+            geo_str = f"{entity['home_location']} ({entity['lat']:.4f}, {entity['lon']:.4f})"
+            duration = random.randint(60, 3600)
+            cmd_seq = random.choice(NORMAL_COMMAND_SEQUENCES)
+
             events.append({
+                "entity_id": entity["entity_id"],
+                "entity_type": entity["entity_type"],
                 "timestamp": event_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                "user_id": user["user_id"],
-                "role": user["role"],
-                "domain": user["domain"],
-                "target_resource": target_resource,
-                "asset_domain": asset_domain,
-                "ip_address": ip_addr,
-                "latitude": user["lat"] + random.uniform(-0.01, 0.01),
-                "longitude": user["lon"] + random.uniform(-0.01, 0.01),
-                "location_name": user["home_location"],
-                "device_id": user["primary_device"],
-                "mb_transferred": mb_transferred,
-                "auth_result": "SUCCESS",
-                "is_attack": False,
-                "attack_type": "None",
-                "taxonomy": "Normal"
+                "source_ip": ip,
+                "geo_location": geo_str,
+                "resource_accessed": resource,
+                "auth_method": entity["auth_method"],
+                "session_duration": duration,
+                "command_sequence": cmd_seq,
+                "device_fingerprint": entity["device_fingerprint"],
+                "label": "normal",
+                "role": entity["role"],
+                "domain": entity["domain"],
+                "mb_transferred": round(random.uniform(10.0, 150.0), 2)
             })
-            
-            events_created += 1
-            current_time += timedelta(minutes=random.randint(5, 25))
-            
+
+            current_time += timedelta(minutes=random.randint(4, 20))
+
+        # 2. Inject 6 Official Malicious Attack Categories
+        cats = ["brute_force", "impossible_travel", "credential_stuffing", "lateral_movement", "device_spoofing", "low_and_slow_exfiltration"]
+        per_cat = max(1, num_anomalies // (len(cats) + 2))
+
+        # A. brute_force (rapid failed auth attempts)
+        for _ in range(per_cat):
+            ent = random.choice(self.entities)
+            dt = start_dt + timedelta(days=random.randint(1, 10), hours=random.randint(8, 18))
+            for f in range(8):
+                events.append({
+                    "entity_id": ent["entity_id"],
+                    "entity_type": ent["entity_type"],
+                    "timestamp": (dt + timedelta(seconds=f*4)).strftime("%Y-%m-%d %H:%M:%S"),
+                    "source_ip": "185.190.140.22",
+                    "geo_location": f"{ent['home_location']} ({ent['lat']:.4f}, {ent['lon']:.4f})",
+                    "resource_accessed": random.choice(ent["allowed_resources"]),
+                    "auth_method": "password",
+                    "session_duration": 5,
+                    "command_sequence": "auth_attempt -> auth_failed",
+                    "device_fingerprint": ent["device_fingerprint"],
+                    "label": "brute_force",
+                    "role": ent["role"],
+                    "domain": ent["domain"],
+                    "mb_transferred": 0.0
+                })
+
+        # B. impossible_travel (geographically distant login in minutes)
+        for _ in range(per_cat):
+            ent = random.choice(self.entities)
+            dt = start_dt + timedelta(days=random.randint(1, 10), hours=10)
+            events.append({
+                "entity_id": ent["entity_id"],
+                "entity_type": ent["entity_type"],
+                "timestamp": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "source_ip": ent["ip_prefix"] + "12",
+                "geo_location": f"Atlanta_HQ (33.7490, -84.3880)",
+                "resource_accessed": "Corporate_VPN",
+                "auth_method": ent["auth_method"],
+                "session_duration": 300,
+                "command_sequence": "login -> vpn_connect",
+                "device_fingerprint": ent["device_fingerprint"],
+                "label": "normal",
+                "role": ent["role"],
+                "domain": ent["domain"],
+                "mb_transferred": 25.0
+            })
+            events.append({
+                "entity_id": ent["entity_id"],
+                "entity_type": ent["entity_type"],
+                "timestamp": (dt + timedelta(minutes=12)).strftime("%Y-%m-%d %H:%M:%S"),
+                "source_ip": "192.168.90.105",
+                "geo_location": "Singapore_Facility (1.3521, 103.8198)",
+                "resource_accessed": "Corporate_VPN",
+                "auth_method": ent["auth_method"],
+                "session_duration": 450,
+                "command_sequence": "login -> vpn_connect -> abnormal_jump",
+                "device_fingerprint": ent["device_fingerprint"],
+                "label": "impossible_travel",
+                "role": ent["role"],
+                "domain": ent["domain"],
+                "mb_transferred": 45.0
+            })
+
+        # C. credential_stuffing (many entity_ids, 1 source IP, high failure rate)
+        spray_ip = "194.26.29.110"
+        for i in range(per_cat):
+            target_ent = self.entities[i % len(self.entities)]
+            dt = start_dt + timedelta(days=5, hours=2, minutes=i*3)
+            events.append({
+                "entity_id": target_ent["entity_id"],
+                "entity_type": target_ent["entity_type"],
+                "timestamp": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "source_ip": spray_ip,
+                "geo_location": "Unknown_External_Proxy (55.7558, 37.6173)",
+                "resource_accessed": "Active_Directory",
+                "auth_method": "password",
+                "session_duration": 2,
+                "command_sequence": "credential_stuffing_attempt -> auth_failure",
+                "device_fingerprint": "Python-Requests/2.31.0 | MAC: 00:00:00:00:00:00",
+                "label": "credential_stuffing",
+                "role": target_ent["role"],
+                "domain": target_ent["domain"],
+                "mb_transferred": 0.1
+            })
+
+        # D. lateral_movement (IT entity accessing OT resources)
+        it_users = [e for e in self.entities if e["domain"] == "IT" and e["role"] in ["Finance_Manager", "HR_Specialist"]]
+        for i in range(per_cat):
+            ent = random.choice(it_users)
+            dt = start_dt + timedelta(days=random.randint(2, 12), hours=14)
+            events.append({
+                "entity_id": ent["entity_id"],
+                "entity_type": ent["entity_type"],
+                "timestamp": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "source_ip": ent["ip_prefix"] + "199",
+                "geo_location": f"{ent['home_location']} ({ent['lat']:.4f}, {ent['lon']:.4f})",
+                "resource_accessed": "Honeywell_Forge_Gateway" if i % 2 == 0 else "BMS_Controller_HVAC_01",
+                "auth_method": ent["auth_method"],
+                "session_duration": 1800,
+                "command_sequence": "ssh_connect -> modbus_read -> plc_override_attempt -> unauthorized_hop",
+                "device_fingerprint": ent["device_fingerprint"],
+                "label": "lateral_movement",
+                "role": ent["role"],
+                "domain": ent["domain"],
+                "mb_transferred": 450.0
+            })
+
+        # E. device_spoofing (device_id reappearing with mismatched OS/MAC fingerprint)
+        for _ in range(per_cat):
+            ent = random.choice(self.entities)
+            dt = start_dt + timedelta(days=random.randint(3, 11), hours=11)
+            spoofed_fp = "Kali-Linux 2024.1 | MAC: de:ad:be:ef:00:01 | Protocol: Raw-Socket"
+            events.append({
+                "entity_id": ent["entity_id"],
+                "entity_type": ent["entity_type"],
+                "timestamp": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "source_ip": ent["ip_prefix"] + "77",
+                "geo_location": f"{ent['home_location']} ({ent['lat']:.4f}, {ent['lon']:.4f})",
+                "resource_accessed": "SCADA_HMI_Workstation_01",
+                "auth_method": ent["auth_method"],
+                "session_duration": 600,
+                "command_sequence": "spoofed_device_handshake -> raw_socket_inject",
+                "device_fingerprint": spoofed_fp,
+                "label": "device_spoofing",
+                "role": ent["role"],
+                "domain": ent["domain"],
+                "mb_transferred": 120.0
+            })
+
+        # F. low_and_slow_exfiltration (gradual small off-hours resource access over days/weeks)
+        exfil_user = self.entities[2] # USR_003
+        for i in range(per_cat):
+            dt = start_dt + timedelta(days=i*2, hours=random.choice([1, 2, 3]))
+            events.append({
+                "entity_id": exfil_user["entity_id"],
+                "entity_type": exfil_user["entity_type"],
+                "timestamp": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "source_ip": exfil_user["ip_prefix"] + "55",
+                "geo_location": f"{exfil_user['home_location']} ({exfil_user['lat']:.4f}, {exfil_user['lon']:.4f})",
+                "resource_accessed": "AWS_Console",
+                "auth_method": exfil_user["auth_method"],
+                "session_duration": 420,
+                "command_sequence": "quiet_connect -> s3_download_chunk -> background_exfil",
+                "device_fingerprint": exfil_user["device_fingerprint"],
+                "label": "low_and_slow_exfiltration",
+                "role": exfil_user["role"],
+                "domain": exfil_user["domain"],
+                "mb_transferred": round(random.uniform(80.0, 180.0), 2)
+            })
+
+        # 3. Inject Non-Malicious Edge Case: insider_drift
+        # Legitimate entity slowly expanding access footprint over time
+        drift_user = self.entities[0] # USR_001
+        for i in range(6):
+            dt = start_dt + timedelta(days=i*2 + 1, hours=10 + (i % 3))
+            events.append({
+                "entity_id": drift_user["entity_id"],
+                "entity_type": drift_user["entity_type"],
+                "timestamp": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "source_ip": drift_user["ip_prefix"] + "10",
+                "geo_location": f"{drift_user['home_location']} ({drift_user['lat']:.4f}, {drift_user['lon']:.4f})",
+                "resource_accessed": "Jira_Cloud" if i < 3 else "GitHub_Enterprise",
+                "auth_method": drift_user["auth_method"],
+                "session_duration": 900,
+                "command_sequence": "legitimate_work_shift -> new_project_access",
+                "device_fingerprint": drift_user["device_fingerprint"],
+                "label": "insider_drift",
+                "role": drift_user["role"],
+                "domain": drift_user["domain"],
+                "mb_transferred": round(random.uniform(30.0, 70.0), 2)
+            })
+
         df = pd.DataFrame(events)
         df.sort_values(by="timestamp", inplace=True)
         df.reset_index(drop=True, inplace=True)
+
+        malicious_df = df[df["label"].isin(cats)]
+        actual_anomaly_rate = len(malicious_df) / len(df) * 100
+
+        print("\n=== Official Synthetic Data Generation Summary ===")
+        print(f"Total Sessions: {len(df)}")
+        print(f"Normal Sessions: {len(df[df['label'] == 'normal'])}")
+        print(f"Insider Drift Sessions (Non-malicious edge case): {len(df[df['label'] == 'insider_drift'])}")
+        print(f"Malicious Attack Sessions: {len(malicious_df)} ({actual_anomaly_rate:.2f}% anomaly rate)")
+        print("Label Distribution:")
+        print(df["label"].value_counts().to_dict())
+        print("===================================================\n")
+
         return df
 
-    def inject_attack_scenarios(self, df):
-        """
-        Injects explicit attack scenarios ensuring strong representation of Honeywell OT threats.
-        Scenario Types:
-        1. Impossible Travel (Collective)
-        2. Off-Hours Exfiltration (Contextual)
-        3. Dormant Account Reactivation (Collective)
-        4. Device Mismatch on OT Controller (Contextual)
-        5. Rapid Brute-Force (Point)
-        6. IT-to-OT Crossover Misuse (Collective/Contextual - Honeywell Priority)
-        """
-        events = df.to_dict("records")
-        num_events = len(events)
-        
-        injected_counts = {
-            "Impossible Travel": 0,
-            "Off-Hours Exfiltration": 0,
-            "Dormant Account Reactivation": 0,
-            "Device Mismatch OT": 0,
-            "Brute Force": 0,
-            "IT-OT Crossover": 0
-        }
-
-        # 1. Inject Impossible Travel (8 instances)
-        # Select pairs of events spaced close in time for the same user, change location to Singapore/Tokyo
-        for _ in range(8):
-            idx = random.randint(50, num_events - 100)
-            base_event = events[idx]
-            target_user = base_event["user_id"]
-            base_dt = datetime.strptime(base_event["timestamp"], "%Y-%m-%d %H:%M:%S")
-            
-            # Create rapid follow-up login 12 minutes later from Singapore
-            attack_dt = base_dt + timedelta(minutes=12)
-            events.append({
-                "timestamp": attack_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                "user_id": target_user,
-                "role": base_event["role"],
-                "domain": base_event["domain"],
-                "target_resource": "Corporate_VPN",
-                "asset_domain": "IT",
-                "ip_address": "192.168.90.105",
-                "latitude": GEO_LOCATIONS["Singapore_Facility"]["lat"],
-                "longitude": GEO_LOCATIONS["Singapore_Facility"]["lon"],
-                "location_name": "Singapore_Facility",
-                "device_id": base_event["device_id"],
-                "mb_transferred": 45.0,
-                "auth_result": "SUCCESS",
-                "is_attack": True,
-                "attack_type": "Impossible Travel",
-                "taxonomy": "Collective Anomaly"
-            })
-            injected_counts["Impossible Travel"] += 1
-
-        # 2. Inject Off-Hours Exfiltration (8 instances)
-        for _ in range(8):
-            idx = random.randint(30, num_events - 50)
-            base_event = events[idx]
-            base_dt = datetime.strptime(base_event["timestamp"], "%Y-%m-%d %H:%M:%S")
-            off_hours_dt = base_dt.replace(hour=random.choice([1, 2, 3]), minute=random.randint(10, 50))
-            
-            events.append({
-                "timestamp": off_hours_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                "user_id": base_event["user_id"],
-                "role": base_event["role"],
-                "domain": base_event["domain"],
-                "target_resource": "AWS_Console",
-                "asset_domain": "IT",
-                "ip_address": "185.220.101.5", # Suspicious external IP
-                "latitude": base_event["latitude"],
-                "longitude": base_event["longitude"],
-                "location_name": base_event["location_name"],
-                "device_id": base_event["device_id"],
-                "mb_transferred": round(random.uniform(4500.0, 9500.0), 2), # Massive exfil
-                "auth_result": "SUCCESS",
-                "is_attack": True,
-                "attack_type": "Off-Hours Exfiltration",
-                "taxonomy": "Contextual Anomaly"
-            })
-            injected_counts["Off-Hours Exfiltration"] += 1
-
-        # 3. Inject Dormant Account Reactivation (6 instances)
-        dormant_user = self.users[3] # USR_004 (Dormant Domain_Admin)
-        start_dt = datetime.strptime(events[100]["timestamp"], "%Y-%m-%d %H:%M:%S")
-        for i in range(6):
-            reactivation_dt = start_dt + timedelta(days=7, hours=i*2)
-            events.append({
-                "timestamp": reactivation_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                "user_id": dormant_user["user_id"],
-                "role": dormant_user["role"],
-                "domain": "IT",
-                "target_resource": random.choice(["Active_Directory", "Honeywell_Forge_Gateway", "BMS_Controller_HVAC_01"]),
-                "asset_domain": "OT" if i % 2 == 0 else "IT",
-                "ip_address": "10.50.99.12",
-                "latitude": dormant_user["lat"],
-                "longitude": dormant_user["lon"],
-                "location_name": dormant_user["home_location"],
-                "device_id": "Unknown-Legacy-Console",
-                "mb_transferred": 350.0,
-                "auth_result": "SUCCESS",
-                "is_attack": True,
-                "attack_type": "Dormant Account Reactivation",
-                "taxonomy": "Collective Anomaly"
-            })
-            injected_counts["Dormant Account Reactivation"] += 1
-
-        # 4. Inject Device Mismatch on OT Controller (8 instances)
-        for _ in range(8):
-            idx = random.randint(40, num_events - 60)
-            base_event = events[idx]
-            base_dt = datetime.strptime(base_event["timestamp"], "%Y-%m-%d %H:%M:%S")
-            
-            events.append({
-                "timestamp": base_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                "user_id": base_event["user_id"],
-                "role": base_event["role"],
-                "domain": base_event["domain"],
-                "target_resource": "BMS_Controller_HVAC_01",
-                "asset_domain": "OT",
-                "ip_address": base_event["ip_address"],
-                "latitude": base_event["latitude"],
-                "longitude": base_event["longitude"],
-                "location_name": base_event["location_name"],
-                "device_id": "Unrecognized-Kali-Linux-Box", # Suspicious device
-                "mb_transferred": 120.0,
-                "auth_result": "SUCCESS",
-                "is_attack": True,
-                "attack_type": "Device Mismatch OT",
-                "taxonomy": "Contextual Anomaly"
-            })
-            injected_counts["Device Mismatch OT"] += 1
-
-        # 5. Inject Brute Force (10 instances - burst of failures followed by success)
-        for _ in range(10):
-            idx = random.randint(20, num_events - 80)
-            base_event = events[idx]
-            base_dt = datetime.strptime(base_event["timestamp"], "%Y-%m-%d %H:%M:%S")
-            
-            # Generate 8 rapid failed attempts
-            for f in range(8):
-                fail_dt = base_dt + timedelta(seconds=f*5)
-                events.append({
-                    "timestamp": fail_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                    "user_id": base_event["user_id"],
-                    "role": base_event["role"],
-                    "domain": base_event["domain"],
-                    "target_resource": base_event["target_resource"],
-                    "asset_domain": base_event["asset_domain"],
-                    "ip_address": "185.190.140.22",
-                    "latitude": base_event["latitude"],
-                    "longitude": base_event["longitude"],
-                    "location_name": base_event["location_name"],
-                    "device_id": base_event["device_id"],
-                    "mb_transferred": 0.0,
-                    "auth_result": "FAILURE",
-                    "is_attack": True,
-                    "attack_type": "Brute Force",
-                    "taxonomy": "Point Anomaly"
-                })
-            injected_counts["Brute Force"] += 1
-
-        # 6. Inject IT-to-OT Crossover Misuse (10 instances - Honeywell Highlight!)
-        it_users = [u for u in self.users if u["domain"] == "IT" and u["role"] in ["Finance_Manager", "HR_Specialist"]]
-        for i in range(10):
-            target_user = random.choice(it_users)
-            idx = random.randint(50, num_events - 50)
-            base_dt = datetime.strptime(events[idx]["timestamp"], "%Y-%m-%d %H:%M:%S")
-            
-            ot_target = random.choice(["Honeywell_Forge_Gateway", "Industrial_PLC_Substation_01", "SCADA_HMI_Workstation_01"])
-            events.append({
-                "timestamp": base_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                "user_id": target_user["user_id"],
-                "role": target_user["role"],
-                "domain": "IT",
-                "target_resource": ot_target,
-                "asset_domain": "OT",
-                "ip_address": target_user["ip_prefix"] + "222",
-                "latitude": target_user["lat"],
-                "longitude": target_user["lon"],
-                "location_name": target_user["home_location"],
-                "device_id": target_user["primary_device"],
-                "mb_transferred": round(random.uniform(200.0, 800.0), 2),
-                "auth_result": "SUCCESS",
-                "is_attack": True,
-                "attack_type": "IT-OT Crossover",
-                "taxonomy": "Collective Anomaly"
-            })
-            injected_counts["IT-OT Crossover"] += 1
-
-        df_out = pd.DataFrame(events)
-        df_out.sort_values(by="timestamp", inplace=True)
-        df_out.reset_index(drop=True, inplace=True)
-        
-        print("\n=== Synthetic Data Generation Summary ===")
-        print(f"Total Log Events: {len(df_out)}")
-        print(f"Normal Events: {len(df_out[~df_out['is_attack']])}")
-        print(f"Total Attack Events: {len(df_out[df_out['is_attack']])} ({(len(df_out[df_out['is_attack']])/len(df_out))*100:.2f}%)")
-        print("Injected Attacks Breakdown:")
-        for atype, cnt in injected_counts.items():
-            print(f" - {atype}: {cnt} scenario bursts")
-        print("==========================================\n")
-        
-        return df_out
-
 if __name__ == "__main__":
-    gen = SyntheticLogGenerator(num_users=50, num_days=14)
-    raw_df = gen.generate_logs(target_events=1000)
-    final_df = gen.inject_attack_scenarios(raw_df)
-    final_df.to_csv("synthetic_access_logs.csv", index=False)
+    gen = SyntheticLogGenerator(num_entities=50, num_days=14, anomaly_rate=0.015)
+    df = gen.generate_dataset(total_sessions=1500)
+    df.to_csv("synthetic_access_logs.csv", index=False)

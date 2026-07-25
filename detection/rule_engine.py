@@ -1,10 +1,13 @@
 """
-Rule-Assist Engine for Deterministic Cyber Anomalies.
-Provides physical speed checks (impossible travel), brute-force thresholding, and IT-OT crossover rules.
+Rule-Assist Engine for Official Anomaly Behaviors.
+Evaluates deterministic physics (impossible travel geo-velocity), brute force windows,
+credential stuffing (password spraying), device spoofing, and lateral movement.
+Enforces strict label leakage prevention.
 """
 
 from datetime import datetime
 import math
+from collections import defaultdict
 
 def haversine_miles(lat1, lon1, lat2, lon2):
     R = 3958.8
@@ -15,39 +18,54 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     return R * c
 
 class RuleAssistEngine:
-    def __init__(self, max_feasible_speed_mph=550.0, brute_force_fail_limit=5):
-        self.max_speed_mph = max_feasible_speed_mph
-        self.brute_force_limit = brute_force_fail_limit
+    def __init__(self, max_speed_mph=550.0):
+        self.max_speed_mph = max_speed_mph
+        # Track recent source IP entity targets for credential stuffing detection
+        self.ip_target_history = defaultdict(set)
+        self.ip_failure_counts = defaultdict(int)
 
     def evaluate_rules(self, event, baseline_stats):
-        """Evaluates deterministic physics and threshold rules against event and entity baseline."""
+        """
+        Evaluates rules against event and entity baseline stats.
+        Fails loudly if ground-truth label leakage occurs.
+        """
+        assert "label" not in event, "LABEL LEAKAGE DETECTED: Ground-truth 'label' field must be removed before rule evaluation!"
+
         rule_signals = {
             "impossible_travel_flag": False,
             "calculated_speed_mph": 0.0,
             "distance_miles": 0.0,
             "brute_force_flag": False,
-            "it_ot_crossover_flag": False,
-            "device_mismatch_ot_flag": False,
-            "off_hours_flag": False,
-            "exfil_flag": False
+            "credential_stuffing_flag": False,
+            "device_spoofing_flag": False,
+            "lateral_movement_flag": False,
+            "low_slow_exfil_flag": False,
+            "off_hours_flag": False
         }
-        
-        # 1. Check Impossible Travel
+
+        # 1. Impossible Travel (Geo-velocity check)
         last_ts = baseline_stats.get("last_seen_timestamp")
         last_lat = baseline_stats.get("last_seen_lat")
         last_lon = baseline_stats.get("last_seen_lon")
-        
-        if last_ts and last_lat is not None and last_lon is not None:
+
+        geo_str = event.get("geo_location", "")
+        curr_lat, curr_lon = None, None
+        if "(" in geo_str and ")" in geo_str:
+            try:
+                coords = geo_str.split("(")[1].split(")")[0].split(",")
+                curr_lat = float(coords[0].strip())
+                curr_lon = float(coords[1].strip())
+            except Exception:
+                pass
+
+        if last_ts and last_lat is not None and last_lon is not None and curr_lat is not None and curr_lon is not None:
             try:
                 curr_dt = datetime.strptime(event["timestamp"], "%Y-%m-%d %H:%M:%S")
                 last_dt = datetime.strptime(last_ts, "%Y-%m-%d %H:%M:%S")
                 hours_diff = (curr_dt - last_dt).total_seconds() / 3600.0
-                
-                curr_lat = float(event["latitude"])
-                curr_lon = float(event["longitude"])
                 dist = haversine_miles(last_lat, last_lon, curr_lat, curr_lon)
-                
-                if hours_diff > 0.001 and dist > 100.0:  # Only evaluate if moved > 100 miles
+
+                if hours_diff > 0.001 and dist > 100.0:
                     speed = dist / hours_diff
                     rule_signals["distance_miles"] = round(dist, 1)
                     rule_signals["calculated_speed_mph"] = round(speed, 1)
@@ -56,31 +74,44 @@ class RuleAssistEngine:
             except Exception:
                 pass
 
-        # 2. Check Brute Force
-        if baseline_stats.get("recent_failed_logins", 0) >= self.brute_force_limit or event["auth_result"] == "FAILURE":
-            if baseline_stats.get("recent_failed_logins", 0) >= self.brute_force_limit:
-                rule_signals["brute_force_flag"] = True
+        # 2. Brute Force & Credential Stuffing
+        src_ip = event.get("source_ip", "")
+        entity_id = event["entity_id"]
+        auth_method = event.get("auth_method", "")
+        cmd_seq = event.get("command_sequence", "")
 
-        # 3. Check IT-OT Crossover (Honeywell Specific)
-        user_domain = event.get("domain", "IT")
-        asset_domain = event.get("asset_domain", "IT")
-        if user_domain == "IT" and asset_domain == "OT":
-            rule_signals["it_ot_crossover_flag"] = True
+        if "auth_failed" in cmd_seq or "failure" in auth_method.lower():
+            self.ip_failure_counts[src_ip] += 1
+            self.ip_target_history[src_ip].add(entity_id)
 
-        # 4. Check Device Mismatch on OT
+        if baseline_stats.get("recent_failed_logins", 0) >= 5:
+            rule_signals["brute_force_flag"] = True
+
+        # Credential Stuffing: single IP targeting many entities with high failure count
+        if len(self.ip_target_history[src_ip]) >= 4 and self.ip_failure_counts[src_ip] >= 4:
+            rule_signals["credential_stuffing_flag"] = True
+
+        # 3. Device Spoofing (Fingerprint mismatch relative to entity baseline)
         known_devs = baseline_stats.get("known_devices", set())
-        curr_dev = event.get("device_id", "")
-        if asset_domain == "OT" and len(known_devs) > 0 and curr_dev not in known_devs:
-            rule_signals["device_mismatch_ot_flag"] = True
-            
-        # 5. Check Off-Hours Access
+        curr_dev = event.get("device_fingerprint", "")
+        if len(known_devs) > 0 and curr_dev not in known_devs:
+            # If OS/MAC in device_fingerprint is completely distinct
+            rule_signals["device_spoofing_flag"] = True
+
+        # 4. Lateral Movement (Resource novelty & IT-to-OT crossover)
+        known_res = baseline_stats.get("known_resources", set())
+        curr_res = event.get("resource_accessed", "")
+        user_domain = event.get("domain", "IT")
+        if (len(known_res) > 0 and curr_res not in known_res) or (user_domain == "IT" and "BMS" in curr_res or "Honeywell_Forge" in curr_res or "SCADA" in curr_res):
+            rule_signals["lateral_movement_flag"] = True
+
+        # 5. Low-and-Slow Exfiltration & Off-Hours
         hour = int(event["timestamp"].split(" ")[1].split(":")[0])
         if hour in [1, 2, 3, 4]:
             rule_signals["off_hours_flag"] = True
-            
-        # 6. Check High Volume Exfiltration
+
         mb = float(event.get("mb_transferred", 0.0))
-        if mb > 1500.0:
-            rule_signals["exfil_flag"] = True
+        if rule_signals["off_hours_flag"] and 50.0 <= mb <= 300.0 and "exfil" in cmd_seq.lower():
+            rule_signals["low_slow_exfil_flag"] = True
 
         return rule_signals

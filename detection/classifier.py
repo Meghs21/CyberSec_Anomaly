@@ -1,37 +1,49 @@
 """
-Anomaly Taxonomy & Attack Classifier Engine.
-Classifies flagged events into Point, Contextual, or Collective anomalies and maps attack types.
+Official Attack Taxonomy Classifier (Stage 2).
+Classifies detected anomalies into exact official categories:
+- brute_force
+- impossible_travel
+- credential_stuffing
+- lateral_movement
+- device_spoofing
+- low_and_slow_exfiltration
+- insider_drift (Non-malicious concept drift edge case)
+- normal
+Enforces strict label leakage prevention.
 """
 
 class AnomalyClassifier:
-    def classify_anomaly(self, event, rule_signals, feature_vec, baseline_stats):
+    def classify_anomaly(self, event, rule_signals, feature_vec, sequence_score, baseline_stats, risk_score):
         """
-        Classifies an anomaly event into taxonomy category and attack label.
+        Classifies an event based strictly on observed signals and feature deviations.
+        Fails loudly if ground-truth label leakage is detected!
         """
-        # Rule deterministic classifications
-        if rule_signals.get("impossible_travel_flag"):
-            return "Collective Anomaly", "Impossible Travel"
-            
-        if rule_signals.get("brute_force_flag") or event.get("auth_result") == "FAILURE":
-            return "Point Anomaly", "Brute Force"
-            
-        if rule_signals.get("it_ot_crossover_flag"):
-            return "Collective Anomaly", "IT-OT Crossover"
-            
-        if rule_signals.get("device_mismatch_ot_flag"):
-            return "Contextual Anomaly", "Device Mismatch OT"
-            
-        if rule_signals.get("off_hours_flag") and rule_signals.get("exfil_flag"):
-            return "Contextual Anomaly", "Off-Hours Exfiltration"
-            
-        # Check for dormant account (event count < 5 but entity ID exists with dormant tag or long gap)
-        if baseline_stats.get("is_cold_start") and event.get("target_resource") in ["BMS_Controller_HVAC_01", "Honeywell_Forge_Gateway"]:
-            return "Collective Anomaly", "Dormant Account Reactivation"
-            
-        if rule_signals.get("off_hours_flag"):
-            return "Contextual Anomaly", "Off-Hours Resource Access"
-            
-        if rule_signals.get("exfil_flag"):
-            return "Contextual Anomaly", "High Transfer Exfiltration"
+        assert "label" not in event, "LABEL LEAKAGE DETECTED: Ground-truth 'label' field must be removed before classification!"
 
-        return "Contextual Anomaly", "Unusual Behavioral Deviation"
+        # Deterministic rule-based classification mapping
+        if rule_signals.get("impossible_travel_flag"):
+            return "impossible_travel", "Collective Anomaly"
+
+        if rule_signals.get("credential_stuffing_flag"):
+            return "credential_stuffing", "Point Anomaly"
+
+        if rule_signals.get("brute_force_flag"):
+            return "brute_force", "Point Anomaly"
+
+        if rule_signals.get("device_spoofing_flag") or feature_vec[2] > 0.5:
+            return "device_spoofing", "Contextual Anomaly"
+
+        if rule_signals.get("lateral_movement_flag") or sequence_score > 0.65:
+            return "lateral_movement", "Collective Anomaly"
+
+        if rule_signals.get("low_slow_exfil_flag") or (rule_signals.get("off_hours_flag") and feature_vec[1] > 1.8):
+            return "low_and_slow_exfiltration", "Contextual Anomaly"
+
+        # Check for insider_drift edge case (gradual legitimate expansion)
+        if 20.0 <= risk_score < 50.0 and (feature_vec[4] > 0.5 or baseline_stats.get("baseline_type") == "blended"):
+            return "insider_drift", "Behavioral Drift (Adapting)"
+
+        if risk_score >= 60.0:
+            return "lateral_movement", "Contextual Anomaly"
+
+        return "normal", "Normal Baseline"

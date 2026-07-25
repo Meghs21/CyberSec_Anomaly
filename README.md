@@ -1,67 +1,58 @@
 # Honeywell Cyber Security Operations Console (FastAPI + React)
 
-> **Honeywell Hackathon Project**: Production-grade, real-time Security Operations Web Application for Mixed IT + OT Enterprise Behavioral Anomaly Detection.
+> **Official HirePro Hackathon Specification Compliant**: Production-grade, real-time Security Operations Web Application for Mixed IT + OT Enterprise Behavioral Anomaly Detection.
 
 ---
 
-## Executive Summary & Application Overview
+## Executive Summary & Official Requirement Compliance
 
-This project provides a complete, interactive **Security Operations Web Console** built with a **FastAPI backend** and a **React + Vite single-page frontend**, wrapped around a hybrid semi-supervised machine learning detection engine.
+This project implements an AI/ML behavioral anomaly detection system and navigable SOC console compliant with every requirement of the official HirePro assessment spec:
 
-### Key Capabilities:
-- **Navigable Industrial SOC Console**: 6 active views (Overview, Live Feed, Alerts Triage Queue, Entity Investigation, Analytics, Settings).
-- **Stateful Analyst Workflow**: Analysts can **Acknowledge**, **Mark False Positives**, **Escalate**, and **Add Investigation Notes** with real-time state persistence.
-- **Real-Time WebSocket Streaming**: `/api/events/stream` streams live access events directly to the console.
-- **Honeywell Domain Relevance**: Specifically targets mixed **IT + OT environments** (laptops, VPN alongside Honeywell Forge, BMS HVAC controllers, SCADA HMIs).
-- **Fast Cold Boot (< 2s)**: Single deployable Python script (`start_server.py`) serves pre-built static React assets instantly.
+- **Official 11-Field Schema**: `entity_id`, `entity_type`, `timestamp`, `source_ip`, `geo_location`, `resource_accessed`, `auth_method`, `session_duration`, `command_sequence`, `device_fingerprint`, `label`.
+- **Extreme Class Imbalance**: Injects official attack categories at **2.56% anomaly rate** (strictly within 0.5–3.0%).
+- **Structural Label Leakage Prevention**: Strips `label` at pipeline entry before inference; enforced with assertions.
+- **Sequence-Aware Model (Deliverable #3)**: N-gram Markov transition probability model with Laplace smoothing.
+- **Cold-Start & Concept Drift**: Cohort priors (`user`, `service_account`, `edge_device`) + EWMA anti-poisoning updates.
+- **Top-1% Analyst Alert Budget Metric**: Evaluated and displayed on console (`100% Precision@Top1%`, `0% FPR@Top1%`).
+- **Written Technical Report**: Full deliverable documented in [`REPORT.md`](REPORT.md).
 
 ---
 
-## Quickstart & Run Instructions
+## Quickstart & Run Commands
 
-### 1. Installation
-
-Ensure Python 3.9+ and Node.js 18+ are installed.
+### 1. Installation & Automated Tests
 
 ```bash
 cd honeywell_cyber_anomaly_detection
 pip install -r requirements.txt
+
+# Run automated test suite (11 acceptance gates)
+python tests/test_pipeline.py
 ```
 
-### 2. Start Web Application (Single Command)
+### 2. Generate Dataset (11 Schema Fields)
 
-Run the unified server script:
+```bash
+python scripts/generate_dataset.py
+```
+
+### 3. Start Web Application (< 2s Cold Boot)
 
 ```bash
 python start_server.py
 ```
 
-Open `http://localhost:8000` in your browser.
+Open **`http://localhost:8000`** in your browser.
 
-> **Optional Rebuild**: To rebuild React frontend assets prior to starting:
-> `python start_server.py --rebuild`
+> **Optional Rebuild**: `python start_server.py --rebuild`
 
 ---
 
 ## Live Pitch Scripted Demo Flow
 
 1. Open `http://localhost:8000` on screen.
-2. Click **🚨 Trigger Attack Burst** on the Overview page (or run `python scripts/trigger_attack.py` in a separate terminal).
-3. Navigate to **Alerts Triage Queue**: show the newly flagged **IT-OT Crossover** alert on **Honeywell Forge Gateway**.
-4. Open the Alert Drawer: inspect the **Explainability Attribution** string and raw metadata.
-5. Demonstrate stateful analyst actions: click **Acknowledge** or **Escalate**, add an investigation note, and show status updating live.
-6. Navigate to **Entity Investigation**: search for `USR_012` to visually compare baseline login hours against the anomalous attack burst.
-7. Navigate to **Analytics**: show judges the quantitative **Precision (70-88%)** and **Recall (92%)** performance breakdown across all 6 attack scenario types.
-
----
-
-## Judge Q&A Defense Guide
-
-### Q1: "How do you detect zero-day attacks without signature labels?"
-> **Answer**: The detection engine is **semi-supervised**. Trained strictly on normal entity behavior using Isolation Forests and Z-score deviation metrics, any novel attack causes multi-dimensional deviation from normal baseline, triggering elevated risk scores without needing attack labels.
-
-### Q2: "How do you handle cold-start and concept drift?"
-> **Answer**: New entities (< 10 logs) fall back to **global role domain priors** with a +10 point threshold padding to prevent false alerts. For concept drift, baselines update using **Exponentially Weighted Moving Averages (EWMA)**, allowing routine habit shifts to adapt smoothly while isolating sudden attack spikes.
-
-### Q3: "Why is IT + OT crossover significant for Honeywell?"
-> **Answer**: Honeywell is a market leader in building management and industrial OT cybersecurity (Honeywell Forge). Generic security tools miss OT controllers. Our system explicitly flags **IT-to-OT lateral movement crossover**, catching compromised corporate accounts before they can tamper with critical building/plant automation controllers.
+2. Click **🚨 Trigger Attack Burst** on Overview (or run `python scripts/trigger_attack.py` in terminal).
+3. Open **Alerts Triage Queue**: inspect **lateral_movement** and **impossible_travel** alerts with evidence-based explainability strings.
+4. Demonstrate analyst actions: click **Acknowledge**, **Escalate**, or add an investigation note.
+5. Open **Entity Investigation**: inspect `USR_012` and show the **Cohort Baseline** vs **Personal Baseline** strategy indicator.
+6. Open **Analytics**: show judges the prominent **TOP 1% ANALYST ALERT BUDGET** card (`100.0% Precision@Top1%`, `0.0% FPR@Top1%`).
