@@ -19,8 +19,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from data_gen.generator import SyntheticLogGenerator
 from detection.baseline import EntityBaselineProfiler
 from detection.cold_start import ColdStartManager
-from detection.sequence_model import SequenceAnomalyDetector
-from detection.sequence_model_autoencoder import SequenceAutoencoderDetector
+from detection.sequence import SequenceMarkovDetector, SequenceAutoencoderDetector, SequenceIntelligenceFusion
 from detection.rule_engine import RuleAssistEngine
 from detection.ml_detector import MLAnomalyDetector
 from detection.risk_fusion import RiskFusionEngine
@@ -52,8 +51,9 @@ class DataStore:
     def _run_pipeline(self):
         profiler = EntityBaselineProfiler()
         cold_start = ColdStartManager(min_events_threshold=10)
-        sequence_detector = SequenceAnomalyDetector(min_cohort_events=10)
+        sequence_detector = SequenceMarkovDetector(min_cohort_events=10)
         autoencoder_detector = SequenceAutoencoderDetector()
+        seq_fusion = SequenceIntelligenceFusion(mode=self.sequence_mode)
         rule_engine = RuleAssistEngine()
         ml_detector = MLAnomalyDetector(contamination=0.02)
         risk_fusion = RiskFusionEngine(base_alert_threshold=self.current_threshold)
