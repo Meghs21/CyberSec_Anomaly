@@ -92,6 +92,29 @@ Anomalous sequences demonstrate a **4.66x higher MSE reconstruction loss** compa
 
 ---
 
+## 22. Enterprise Production Readiness Strategy (RBAC, HA, Kafka & Compliance)
+
+While this prototype delivers the core ML detection engine, risk fusion, sequence intelligence, and explainability console, it is explicitly architected as a **stateless, decoupled microservice** ([`backend/main.py`](file:///C:/Users/meghna/.gemini/antigravity/scratch/honeywell_cyber_anomaly_detection/backend/main.py)). In an enterprise SOC deployment (e.g. Honeywell Forge or Microsoft Sentinel), enterprise operational layers are wrapped around this engine without altering any core detection logic:
+
+### A. Authentication & Role-Based Access Control (RBAC)
+- **Identity Provider Integration**: OAuth2 / OIDC token validation via Keycloak, Ping Identity, or Azure AD.
+- **Granular Scopes**:
+  - `soc:analyst` (Read-only alerts, event stream, entity profiles).
+  - `soc:lead` (Acknowledge, escalate, add triage notes).
+  - `soc:admin` (Tune risk threshold sliders, update model parameters).
+
+### B. High Availability (HA) & Distributed Ingestion
+- **Streaming Telemetry Ingestion**: Replace HTTP ingestion with an **Apache Kafka / Flink** consumer group processing $> 100,000$ events/second.
+- **Stateless Kubernetes Scaling**: Deploy engine instances as a **Kubernetes Deployment with Horizontal Pod Autoscaler (HPA)** scaling dynamically on CPU and queue length.
+
+### C. State Storage, Monitoring & Compliance
+- **Real-Time Feature Store**: Entity baseline distributions migrated to a **Redis Cluster** for sub-millisecond profile retrieval.
+- **Analytics & Long-Term Storage**: Event telemetry indexed in **ClickHouse / PostgreSQL** with multi-region active-passive disaster recovery.
+- **Monitoring**: Expose `/metrics` endpoint for **Prometheus / Grafana** to track inference latency, memory consumption, and baseline concept drift.
+- **Regulatory Compliance**: Immutable log forwarding to **S3 WORM (Write Once Read Many) Storage** for ISO27001, SOC2, and HIPAA compliance audit trails.
+
+---
+
 ## 5. Production Readiness & Maturity Statement
 
 > *"This prototype implements the core behavioral detection engine. The architecture is designed so that production concerns such as model retraining, monitoring, feature stores, and deployment can be layered on without changing the detection pipeline."*
