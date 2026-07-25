@@ -30,30 +30,50 @@ class SequenceMarkovDetector:
         self.vocab = set()
 
     def _extract_states(self, event):
-        """Extracts sequence state tokens from resource_accessed and command_sequence."""
+        """Extracts composite event state and command tokens."""
+        assert "label" not in event, "LABEL LEAKAGE DETECTED in state extraction!"
         res = event.get("resource_accessed", "unknown")
+        auth = event.get("auth_method", "password")
+        event_state = f"{res}:{auth}"
+        
         cmd_seq = event.get("command_sequence", "")
         tokens = [t.strip() for t in cmd_seq.split("->") if t.strip()]
         
-        states = [res] + tokens if tokens else [res]
+        states = [event_state] + tokens if tokens else [event_state]
         for s in states:
             self.vocab.add(s)
         return states
 
     def fit_normal_baseline(self, events):
-        """Fits transition counts strictly on initial normal baseline training events."""
+        """Fits transition counts strictly on initial normal baseline training events grouped by entity."""
+        entity_groups = defaultdict(list)
         for ev in events:
             assert "label" not in ev or ev.get("label") == "normal", "Markov baseline training on normal events"
-            entity_id = ev["entity_id"]
-            entity_type = ev.get("entity_type", "user")
-            states = self._extract_states(ev)
-            
-            for i in range(len(states) - 1):
-                s_from, s_to = states[i], states[i+1]
-                self.entity_transitions[entity_id][s_from][s_to] += 1
-                self.cohort_transitions[entity_type][s_from][s_to] += 1
+            ev_clean = {k: v for k, v in ev.items() if k != "label"}
+            entity_groups[ev["entity_id"]].append(ev_clean)
 
-    def calculate_sequence_score(self, event, entity_profile):
+        for entity_id, ent_events in entity_groups.items():
+            sorted_events = sorted(ent_events, key=lambda x: str(x.get("timestamp", "")))
+            
+            for i, ev in enumerate(sorted_events):
+                entity_type = ev.get("entity_type", "user")
+                states = self._extract_states(ev)
+                
+                # Intra-event command sequence transitions
+                for j in range(len(states) - 1):
+                    s_from, s_to = states[j], states[j+1]
+                    self.entity_transitions[entity_id][s_from][s_to] += 1
+                    self.cohort_transitions[entity_type][s_from][s_to] += 1
+                
+                # Inter-event session transition (from prev event to curr event)
+                if i > 0:
+                    prev_ev = sorted_events[i-1]
+                    prev_state = f"{prev_ev.get('resource_accessed')}:{prev_ev.get('auth_method')}"
+                    curr_state = f"{ev.get('resource_accessed')}:{ev.get('auth_method')}"
+                    self.entity_transitions[entity_id][prev_state][curr_state] += 1
+                    self.cohort_transitions[entity_type][prev_state][curr_state] += 1
+
+    def calculate_sequence_score(self, event, entity_profile, prev_event=None):
         """
         Calculates Markov sequence anomaly score in [0.0, 1.0].
         0.0 = expected transition; 1.0 = highly unusual transition.
@@ -63,8 +83,16 @@ class SequenceMarkovDetector:
         
         entity_id = event["entity_id"]
         entity_type = event.get("entity_type", "user")
-        states = self._extract_states(event)
+        curr_states = self._extract_states(event)
         
+        # Combine inter-event and intra-event states
+        if prev_event:
+            prev_clean = {k: v for k, v in prev_event.items() if k != "label"}
+            prev_state = f"{prev_clean.get('resource_accessed')}:{prev_clean.get('auth_method')}"
+            states = [prev_state] + curr_states
+        else:
+            states = curr_states
+            
         if len(states) < 2:
             return 0.0
             
@@ -80,13 +108,16 @@ class SequenceMarkovDetector:
             total_out = sum(out_counts.values())
             trans_count = out_counts.get(s_to, 0)
             
+            # Laplace additive smoothing
             prob = (trans_count + self.alpha) / (total_out + self.alpha * V)
             prob = max(self.prob_floor, prob)
             neg_log_probs.append(-np.log(prob))
             
         mean_neg_log = float(np.mean(neg_log_probs))
-        normalized_score = min(1.0, max(0.0, (mean_neg_log - 1.0) / 8.0))
-        return round(normalized_score, 3)
+        
+        # Normalize negative log-probability into score range [0.0, 1.0]
+        normalized_score = min(1.0, max(0.0, (mean_neg_log - 1.0) / 7.0))
+        return round(float(normalized_score), 3)
 
     def update_transitions_online(self, event, inferred_risk_score, trust_threshold=45.0):
         """Online update of transitions for low-risk observations (anti-poisoning)."""
