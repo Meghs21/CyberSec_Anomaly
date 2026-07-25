@@ -58,7 +58,7 @@ def evaluate_all_modes():
         ev_clean = {k: v for k, v in ev.items() if k != "label"}
         entity_histories[ent].append(ev_clean)
         
-        _, mse = ae_det.calculate_autoencoder_score(ev_clean, entity_histories[ent])
+        _, mse, _ = ae_det.calculate_autoencoder_score(ev_clean, entity_histories[ent])
         if ev.get("label", "normal") == "normal":
             normal_mses.append(mse)
         elif ev.get("label") not in ["normal", "insider_drift"]:

@@ -101,7 +101,7 @@ class DataStore:
 
             # 4. Sequence Anomaly Scoring (N-Gram & Autoencoder)
             ngram_score = sequence_detector.calculate_sequence_score(ev_inference, personal_profile)
-            ae_score, ae_mse = autoencoder_detector.calculate_autoencoder_score(ev_inference, entity_histories[entity_id])
+            ae_score, ae_mse, ae_attr = autoencoder_detector.calculate_autoencoder_score(ev_inference, entity_histories[entity_id])
 
             # 5. Risk Score Fusion (Supports 3-way toggle: 'ngram', 'autoencoder', 'both')
             risk_score, severity, dynamic_thresh = risk_fusion.fuse_risk_score(
