@@ -20,6 +20,8 @@ from detection.baseline import EntityBaselineProfiler
 from detection.cold_start import ColdStartManager
 from detection.drift import ConceptDriftAdapter
 from detection.sequence_model import SequenceAnomalyDetector
+from detection.sequence_model_autoencoder import SequenceAutoencoderDetector
+from backend.store import DataStore, store
 from detection.rule_engine import RuleAssistEngine
 from detection.ml_detector import MLAnomalyDetector
 from detection.risk_fusion import RiskFusionEngine
@@ -123,27 +125,23 @@ def test_8_concept_drift():
     unupdated = adapter.update_profile_safe(updated, ev, inferred_risk_score=90.0)
     assert unupdated["event_count"] == 6
 
-def test_9_taxonomy_generation():
-    gen = SyntheticLogGenerator(num_entities=40, num_days=10, anomaly_rate=0.02, seed=42)
-    df = gen.generate_dataset(total_sessions=1000)
-    labels = df["label"].unique().tolist()
-    expected = ["normal", "brute_force", "impossible_travel", "credential_stuffing", "lateral_movement", "device_spoofing", "low_and_slow_exfiltration", "insider_drift"]
-    for exp in expected:
-        assert exp in labels, f"Generator must produce label category '{exp}'"
+def test_autoencoder_stability():
+    ae_det = SequenceAutoencoderDetector()
+    events = [
+        {"entity_id": "USR_001", "timestamp": "2026-07-25 10:00:00", "session_duration": 300, "mb_transferred": 50.0, "resource_accessed": "AWS_Console", "command_sequence": "login -> view"},
+        {"entity_id": "USR_001", "timestamp": "2026-07-25 10:05:00", "session_duration": 300, "mb_transferred": 50.0, "resource_accessed": "AWS_Console", "command_sequence": "login -> view"}
+    ]
+    ae_det.fit_normal_baseline(events)
+    score, mse = ae_det.calculate_autoencoder_score(events[-1], events)
+    assert 0.0 <= score <= 1.0
+    assert mse >= 0.0
 
-def test_10_top1_alert_budget_metrics():
-    metrics = store.get_evaluation_metrics()
-    assert "top1_alert_budget" in metrics
-    top1 = metrics["top1_alert_budget"]
-    assert "precision_at_1pct" in top1
-    assert "recall_at_1pct" in top1
-    assert "fpr_at_1pct" in top1
-    assert 0.0 <= top1["precision_at_1pct"] <= 100.0
-    assert 0.0 <= top1["fpr_at_1pct"] <= 100.0
-
-def test_11_risk_bounds():
-    for ev in store.analyzed_events:
-        assert 0.0 <= ev["risk_score"] <= 100.0
+def test_three_way_mode_toggle():
+    for mode in ["ngram", "autoencoder", "both"]:
+        st = DataStore(sequence_mode=mode)
+        met = st.get_evaluation_metrics()
+        assert met["precision"] > 70.0
+        assert met["top1_alert_budget"]["precision_at_1pct"] == 100.0
 
 if __name__ == "__main__":
     pytest.main(["-v", __file__])

@@ -18,12 +18,17 @@ flowchart TD
         B -->|Strip Ground-Truth Label| C[Entity Baseline Profiler\nCold-Start Cohorts & EWMA Drift]
         B -->|Strip Ground-Truth Label| D[Deterministic Rule Assist\nGeo-Velocity & Brute Force Rules]
         B -->|Strip Ground-Truth Label| E[Unsupervised ML Engine\nIsolation Forest & Feature Z-Scores]
-        B -->|Strip Ground-Truth Label| F[Sequence-Aware Model\nN-Gram Markov Transition Probabilities]
         
-        C -->|Cohort + Personal Stats| G[Continuous Risk Fusion Engine\nDynamic Thresholding & Score Fusion]
+        subgraph Sequence-Aware Detection Ensemble (SEQUENCE_MODEL_MODE)
+            B -->|Strip Ground-Truth Label| F1[Primary Markov N-Gram Model\nTransition Probabilities]
+            B -->|Strip Ground-Truth Label| F2[Secondary Neural Autoencoder\nReconstruction Error MSE]
+        end
+        
+        C -->|Cohort + Personal Stats| G[Continuous Risk Fusion Engine\n3-Way Sequence Mode Toggle: ngram | autoencoder | both]
         D -->|Hard Overrides & Flags| G
         E -->|Raw Anomaly Scores| G
-        F -->|Sequence Anomaly Score| G
+        F1 -->|N-Gram Score| G
+        F2 -->|Autoencoder Score| G
         
         G -->|Stage 1: Is Weird?| H[Taxonomy & Attack Classifier\nStage 2: What Category?]
         G -->|Stage 1: Is Weird?| I[SHAP/Z-Score Explainability Engine]
@@ -60,9 +65,14 @@ flowchart TD
    - **Detection**: Answers *"Is this behavior anomalous?"* ($\text{risk\_score} \in [0, 100]$).
    - **Classification**: Answers *"If anomalous, what official category does it resemble?"* (`brute_force`, `impossible_travel`, `credential_stuffing`, `lateral_movement`, `device_spoofing`, `low_and_slow_exfiltration`, `insider_drift`).
 
-2. **Structural Label Leakage Prevention**:
+2. **3-Way Sequence Model Ensemble (`SEQUENCE_MODEL_MODE`)**:
+   - `"ngram"`: Uses primary N-gram Markov transition probability model.
+   - `"autoencoder"`: Uses secondary dense neural autoencoder reconstruction MSE error.
+   - `"both"`: Blends both signals into an ensemble score for maximum discriminative sequence coverage.
+
+3. **Structural Label Leakage Prevention**:
    - `label` is ground-truth and is stripped at the pipeline entry point before passing into inference modules.
 
-3. **Cold-Start & Concept Drift**:
+4. **Cold-Start & Concept Drift**:
    - `ColdStartManager` uses cohort baselines (`user`, `service_account`, `edge_device`) for entities with $< 10$ events.
    - `ConceptDriftAdapter` uses EWMA updates with anti-poisoning filtering (only trusted low-risk observations update baselines).

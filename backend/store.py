@@ -20,6 +20,7 @@ from data_gen.generator import SyntheticLogGenerator
 from detection.baseline import EntityBaselineProfiler
 from detection.cold_start import ColdStartManager
 from detection.sequence_model import SequenceAnomalyDetector
+from detection.sequence_model_autoencoder import SequenceAutoencoderDetector
 from detection.rule_engine import RuleAssistEngine
 from detection.ml_detector import MLAnomalyDetector
 from detection.risk_fusion import RiskFusionEngine
@@ -27,12 +28,13 @@ from detection.classifier import AnomalyClassifier
 from detection.explainer import ExplainabilityEngine
 
 class DataStore:
-    def __init__(self):
+    def __init__(self, sequence_mode=None):
         self.raw_df = None
         self.analyzed_events = []
         self.ground_truth_labels = {}  # event_id -> true_label
         self.alert_states = {}         # alert_id -> {status, notes}
         self.current_threshold = 60.0
+        self.sequence_mode = sequence_mode or os.getenv("SEQUENCE_MODEL_MODE", "ngram").lower()
         self.load_and_process_data()
 
     def load_and_process_data(self):
@@ -51,6 +53,7 @@ class DataStore:
         profiler = EntityBaselineProfiler()
         cold_start = ColdStartManager(min_events_threshold=10)
         sequence_detector = SequenceAnomalyDetector(min_cohort_events=10)
+        autoencoder_detector = SequenceAutoencoderDetector()
         rule_engine = RuleAssistEngine()
         ml_detector = MLAnomalyDetector(contamination=0.02)
         risk_fusion = RiskFusionEngine(base_alert_threshold=self.current_threshold)
@@ -59,29 +62,31 @@ class DataStore:
 
         events_raw = self.raw_df.to_dict("records")
         
-        # Pre-train baseline & sequence models strictly on initial normal events
+        # Pre-train baseline & both sequence models strictly on initial normal events
         normal_train_split = [e for e in events_raw[:300] if e.get("label", "normal") == "normal"]
         ml_detector.fit_normal_baseline(events_raw[:300], profiler)
         sequence_detector.fit_normal_baseline(normal_train_split)
+        autoencoder_detector.fit_normal_baseline(normal_train_split)
 
         self.analyzed_events = []
         self.ground_truth_labels = {}
+        entity_histories = {}
 
         for idx, ev in enumerate(events_raw):
             alert_id = f"ALT-{idx+1:04d}"
             
-            # --- STRUCTURAL LABEL LEAKAGE PREVENTION ---
-            # Extract ground truth label for evaluation ONLY
             true_label = str(ev.get("label", "normal"))
             self.ground_truth_labels[alert_id] = true_label
             
-            # Strip/drop 'label' field completely before passing into inference pipeline
             ev_inference = {k: v for k, v in ev.items() if k != "label"}
             assert "label" not in ev_inference, "LABEL LEAKAGE DETECTED at pipeline entry point!"
-            # -------------------------------------------
 
             entity_id = ev_inference["entity_id"]
             entity_type = ev_inference.get("entity_type", "user")
+
+            if entity_id not in entity_histories:
+                entity_histories[entity_id] = []
+            entity_histories[entity_id].append(ev_inference)
 
             # 1. Baseline & Cold Start Profiling
             personal_profile = profiler.get_profile(entity_id)
@@ -94,22 +99,24 @@ class DataStore:
             feat_vec = ml_detector.extract_features(ev_inference, effective_baseline)
             ml_score = ml_detector.predict_raw_score(feat_vec)
 
-            # 4. Sequence Anomaly Scoring (Deliverable #3)
-            sequence_score = sequence_detector.calculate_sequence_score(ev_inference, personal_profile)
+            # 4. Sequence Anomaly Scoring (N-Gram & Autoencoder)
+            ngram_score = sequence_detector.calculate_sequence_score(ev_inference, personal_profile)
+            ae_score, ae_mse = autoencoder_detector.calculate_autoencoder_score(ev_inference, entity_histories[entity_id])
 
-            # 5. Risk Score Fusion
+            # 5. Risk Score Fusion (Supports 3-way toggle: 'ngram', 'autoencoder', 'both')
             risk_score, severity, dynamic_thresh = risk_fusion.fuse_risk_score(
-                ev_inference, rule_signals, ml_score, sequence_score, effective_baseline
+                ev_inference, rule_signals, ml_score, ngram_score, ae_score, effective_baseline, sequence_mode=self.sequence_mode
             )
 
             # 6. Attack Classification (Stage 2)
+            effective_seq_score = ae_score if self.sequence_mode == "autoencoder" else (0.5*ngram_score + 0.5*ae_score if self.sequence_mode == "both" else ngram_score)
             tax_cat, attack_cat = classifier.classify_anomaly(
-                ev_inference, rule_signals, feat_vec, sequence_score, effective_baseline, risk_score
+                ev_inference, rule_signals, feat_vec, effective_seq_score, effective_baseline, risk_score
             )
 
             # 7. Explainability Attribution (Deliverable #5)
             reason = explainer.generate_explanation(
-                ev_inference, rule_signals, feat_vec, sequence_score, effective_baseline, tax_cat
+                ev_inference, rule_signals, feat_vec, effective_seq_score, effective_baseline, tax_cat
             )
 
             # 8. Anti-Poisoning Concept Drift & Sequence Transition Updates
