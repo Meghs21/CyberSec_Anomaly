@@ -181,7 +181,8 @@ class DataStore:
             ml_score = ml_detector.predict_raw_score(feat_vec)
 
             # 4. Sequence Anomaly Scoring (N-Gram & Autoencoder)
-            ngram_score = sequence_detector.calculate_sequence_score(ev_inference, personal_profile)
+            prev_ev = entity_histories[entity_id][-2] if len(entity_histories[entity_id]) >= 2 else None
+            ngram_score = sequence_detector.calculate_sequence_score(ev_inference, personal_profile, prev_event=prev_ev)
             ae_score, ae_mse, ae_attr = autoencoder_detector.calculate_autoencoder_score(ev_inference, entity_histories[entity_id])
 
             # 5. Risk Score Fusion (Supports 3-way toggle: 'ngram', 'autoencoder', 'both')
