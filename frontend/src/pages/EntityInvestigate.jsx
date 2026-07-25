@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, User, Shield, AlertTriangle } from 'lucide-react';
+import { Search, User, Shield, AlertTriangle, Flame, ArrowRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ScatterChart, Scatter } from 'recharts';
 
 export default function EntityInvestigate() {
@@ -45,12 +45,15 @@ export default function EntityInvestigate() {
     risk: e.risk_score
   }));
 
+  // Sort top high-risk entities for QRadar-style Monitored Entity Risk Leaderboard
+  const topRiskEntities = [...entities].sort((a, b) => b.alert_count - a.alert_count).slice(0, 5);
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#FFF' }}>Entity Investigation</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Deep-dive analysis of entity baselines vs current activity</p>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#FFF' }}>Entity Investigation & UEBA Profiling</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Deep-dive analysis of entity baselines, cold-start cohort blending, and access footprints</p>
         </div>
 
         {/* Entity Selector */}
@@ -85,6 +88,49 @@ export default function EntityInvestigate() {
         </div>
       </div>
 
+      {/* IBM QRadar UBA-Style Monitored Entity Risk Leaderboard Banner */}
+      <div className="card" style={{ marginBottom: 20, borderLeft: '4px solid var(--hw-amber)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Flame size={20} style={{ color: 'var(--hw-amber)' }} />
+          <h3 style={{ fontSize: 15, color: '#FFF', margin: 0, fontWeight: 700 }}>Monitored High-Risk Entities (IBM QRadar UBA Ranking)</h3>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+          {topRiskEntities.map((ent) => {
+            const isSelected = ent.user_id === selectedEntityId;
+            return (
+              <div
+                key={ent.user_id}
+                onClick={() => setSelectedEntityId(ent.user_id)}
+                style={{
+                  backgroundColor: isSelected ? 'rgba(255, 176, 0, 0.15)' : '#111520',
+                  border: isSelected ? '1px solid var(--hw-amber)' : '1px solid var(--border-color)',
+                  padding: 12,
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span className="mono" style={{ fontWeight: 700, color: '#FFF', fontSize: 13 }}>{ent.user_id}</span>
+                  <span className="badge" style={{ backgroundColor: ent.alert_count > 0 ? 'var(--hw-red)' : 'var(--hw-green)', color: '#FFF', fontSize: 10 }}>
+                    {ent.alert_count} Alerts
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {ent.role}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                  <span className={`badge ${ent.domain === 'OT' ? 'badge-ot' : 'badge-it'}`} style={{ fontSize: 9 }}>{ent.domain}</span>
+                  <span style={{ fontSize: 10, color: 'var(--hw-amber)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 2 }}>
+                    Investigate <ArrowRight size={10} />
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Entity Profile Header Card */}
       <div className="card" style={{ marginBottom: 20, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
         <div>
@@ -115,7 +161,7 @@ export default function EntityInvestigate() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
         <div className="card">
           <h3 style={{ fontSize: 15, color: '#FFF', marginBottom: 16 }}>Historical Login Hour Distribution</h3>
-          <div style={{ height: 240 }}>
+          <div style={{ height: 220 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={hourChartData}>
                 <XAxis dataKey="hour" stroke="var(--text-muted)" fontSize={10} />
@@ -129,7 +175,7 @@ export default function EntityInvestigate() {
 
         <div className="card">
           <h3 style={{ fontSize: 15, color: '#FFF', marginBottom: 16 }}>Data Transfer Payload (MB) Scatter</h3>
-          <div style={{ height: 240 }}>
+          <div style={{ height: 220 }}>
             <ResponsiveContainer width="100%" height="100%">
               <ScatterChart>
                 <XAxis dataKey="timestamp" stroke="var(--text-muted)" fontSize={10} />
@@ -162,8 +208,8 @@ export default function EntityInvestigate() {
             {(entityData.alerts || []).map((alt, i) => (
               <tr key={i}>
                 <td className="mono" style={{ fontSize: 12 }}>{alt.timestamp}</td>
-                <td style={{ fontWeight: 600 }}>{alt.target_resource}</td>
-                <td><span className={`badge ${alt.asset_domain === 'OT' ? 'badge-ot' : 'badge-it'}`}>{alt.asset_domain}</span></td>
+                <td style={{ fontWeight: 600 }}>{alt.resource_accessed || alt.target_resource}</td>
+                <td><span className={`badge ${alt.domain === 'OT' ? 'badge-ot' : 'badge-it'}`}>{alt.domain}</span></td>
                 <td className="mono">{alt.mb_transferred} MB</td>
                 <td style={{ fontWeight: 700, color: 'var(--hw-red)' }}>{alt.risk_score}/100</td>
                 <td style={{ fontWeight: 600, color: 'var(--hw-amber)' }}>{alt.predicted_attack_type}</td>
