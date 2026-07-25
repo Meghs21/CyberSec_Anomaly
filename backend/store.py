@@ -5,6 +5,7 @@ coordinates baseline profiling, sequence modeling, cold-start blending, concept 
 and calculates official evaluation metrics including Top-1% Analyst Alert Budget metrics.
 """
 
+import sqlite3
 import os
 import sys
 import math
@@ -34,7 +35,57 @@ class DataStore:
         self.alert_states = {}         # alert_id -> {status, notes}
         self.current_threshold = 60.0
         self.sequence_mode = sequence_mode or os.getenv("SEQUENCE_MODEL_MODE", "ngram").lower()
+        self.db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "honeywell_cyber.db"))
+        self._init_sqlite_db()
         self.load_and_process_data()
+
+    def _init_sqlite_db(self):
+        """Initializes real-time SQLite database schema on disk."""
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Events table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                event_index INTEGER,
+                timestamp TEXT,
+                entity_id TEXT,
+                entity_type TEXT,
+                role TEXT,
+                domain TEXT,
+                source_ip TEXT,
+                geo_location TEXT,
+                resource_accessed TEXT,
+                auth_method TEXT,
+                session_duration INTEGER,
+                command_sequence TEXT,
+                device_fingerprint TEXT,
+                mb_transferred REAL,
+                risk_score REAL,
+                severity TEXT,
+                is_alert INTEGER,
+                predicted_taxonomy TEXT,
+                explanation TEXT,
+                baseline_type TEXT
+            )
+        """)
+
+        # Alerts audit log table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS alerts_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_id TEXT,
+                action_timestamp TEXT,
+                action_type TEXT,
+                note_text TEXT,
+                analyst_status TEXT
+            )
+        """)
+
+        conn.commit()
+        conn.close()
 
     def load_and_process_data(self):
         data_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "synthetic_access_logs.csv"))
@@ -72,6 +123,7 @@ class DataStore:
                     self.alert_states = cached.get("alert_states", {})
                     if self.analyzed_events:
                         print("[MODEL PERSISTENCE] Successfully loaded pre-analyzed events & models from models_cache.pkl (< 0.2s)")
+                        self._sync_to_sqlite()
                         return
             except Exception as e:
                 print(f"[MODEL PERSISTENCE] Warning: Could not load cache ({e}). Re-analyzing dataset...")
@@ -202,6 +254,36 @@ class DataStore:
         except Exception as e:
             print(f"[MODEL PERSISTENCE] Could not save cache: {e}")
 
+        self._sync_to_sqlite()
+
+    def _sync_to_sqlite(self):
+        """Batch upserts self.analyzed_events into SQLite data/honeywell_cyber.db."""
+        if not self.analyzed_events:
+            return
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            for ev in self.analyzed_events:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO events (
+                        id, event_index, timestamp, entity_id, entity_type, role, domain, source_ip,
+                        geo_location, resource_accessed, auth_method, session_duration, command_sequence,
+                        device_fingerprint, mb_transferred, risk_score, severity, is_alert,
+                        predicted_taxonomy, explanation, baseline_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    ev["id"], ev["event_index"], ev["timestamp"], ev["entity_id"], ev["entity_type"],
+                    ev["role"], ev["domain"], ev["source_ip"], ev["geo_location"], ev["resource_accessed"],
+                    ev["auth_method"], ev["session_duration"], ev["command_sequence"], ev["device_fingerprint"],
+                    ev["mb_transferred"], ev["risk_score"], ev["severity"], 1 if ev["is_alert"] else 0,
+                    ev["predicted_taxonomy"], ev["explanation"], ev["baseline_type"]
+                ))
+            conn.commit()
+            conn.close()
+            print(f"[SQLITE DB ENGINE] Successfully synced {len(self.analyzed_events)} events into honeywell_cyber.db")
+        except Exception as e:
+            print(f"[SQLITE DB WARNING] Could not sync to SQLite: {e}")
+
     def update_threshold(self, new_threshold: float):
         self.current_threshold = new_threshold
         for ev in self.analyzed_events:
@@ -219,9 +301,23 @@ class DataStore:
         elif action_type == "ESCALATE":
             state["status"] = "ESCALATED"
 
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if note_text:
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-            state["notes"].append(f"[{ts}] {note_text}")
+            state["notes"].append(f"[{ts[:16]}] {note_text}")
+
+        # Real-Time SQLite Audit Log Insertion
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO alerts_audit_log (alert_id, action_timestamp, action_type, note_text, analyst_status)
+                VALUES (?, ?, ?, ?, ?)
+            """, (alert_id, ts, action_type, note_text or "", state["status"]))
+            conn.commit()
+            conn.close()
+            print(f"[SQLITE DB AUDIT] Action '{action_type}' for {alert_id} written to honeywell_cyber.db")
+        except Exception as e:
+            print(f"[SQLITE DB WARNING] Could not insert audit log: {e}")
 
         for ev in self.analyzed_events:
             if ev["id"] == alert_id:
