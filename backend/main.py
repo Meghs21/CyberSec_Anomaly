@@ -143,41 +143,46 @@ def perform_analyst_action(alert_id: str, req: ActionRequest):
 @app.get("/api/entities")
 def list_entities():
     df = store.raw_df
-    users = sorted(df["user_id"].unique().tolist())
+    entity_col = "entity_id" if "entity_id" in df.columns else "user_id"
+    entities = sorted(df[entity_col].unique().tolist())
     result = []
-    for u in users:
-        u_events = [e for e in store.analyzed_events if e["user_id"] == u]
-        role = u_events[0]["role"] if u_events else "Unknown"
-        domain = u_events[0]["domain"] if u_events else "IT"
+    for u in entities:
+        u_events = [e for e in store.analyzed_events if e.get("entity_id") == u or e.get("user_id") == u]
+        role = u_events[0].get("role", "Unknown") if u_events else "Unknown"
+        domain = u_events[0].get("domain", "IT") if u_events else "IT"
         alert_cnt = sum(1 for e in u_events if e["is_alert"])
         result.append({
             "user_id": u,
+            "entity_id": u,
             "role": role,
             "domain": domain,
             "event_count": len(u_events),
-            "alert_count": alert_cnt
+            "alert_count": alert_cnt,
+            "baseline_type": u_events[0].get("baseline_type", "personal") if u_events else "cohort"
         })
     return result
 
 @app.get("/api/entities/{entity_id}")
 def get_entity_investigation(entity_id: str):
-    u_events = [e for e in store.analyzed_events if e["user_id"] == entity_id]
+    u_events = [e for e in store.analyzed_events if e.get("entity_id") == entity_id or e.get("user_id") == entity_id]
     if not u_events:
         raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
-        
-    user_role = u_events[0]["role"]
-    user_domain = u_events[0]["domain"]
-    
-    # Calculate hour distribution
+
+    user_role = u_events[0].get("role", "Unknown")
+    user_domain = u_events[0].get("domain", "IT")
+    baseline_type = u_events[0].get("baseline_type", "personal")
+
     hours = [int(e["timestamp"].split(" ")[1].split(":")[0]) for e in u_events]
-    mb_transfers = [float(e["mb_transferred"]) for e in u_events]
-    
+    mb_transfers = [float(e.get("mb_transferred", 0.0)) for e in u_events]
+
     alerts = [e for e in u_events if e["is_alert"]]
-    
+
     return {
         "entity_id": entity_id,
+        "user_id": entity_id,
         "role": user_role,
         "domain": user_domain,
+        "baseline_type": baseline_type,
         "total_events": len(u_events),
         "alert_count": len(alerts),
         "events": u_events,
