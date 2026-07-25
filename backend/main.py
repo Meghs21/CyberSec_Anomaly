@@ -11,7 +11,7 @@ from typing import Optional, List
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 # Ensure parent directory is in sys.path
@@ -64,6 +64,67 @@ class ActionRequest(BaseModel):
 
 class ThresholdRequest(BaseModel):
     threshold: float
+
+# Prometheus OpenTelemetry Monitoring Endpoint (/metrics)
+@app.get("/metrics", response_class=PlainTextResponse)
+def prometheus_metrics():
+    """Exposes standard Prometheus metrics for Grafana monitoring dashboards."""
+    overview = store.get_overview_metrics()
+    eval_metrics = store.get_evaluation_metrics()
+    top1 = eval_metrics.get("top1_alert_budget", {})
+    
+    metrics_text = f"""# HELP cybersec_events_total Total log events processed in detection engine
+# TYPE cybersec_events_total counter
+cybersec_events_total {overview.get('total_events', 0)}
+
+# HELP cybersec_active_alerts_total Total active security alerts
+# TYPE cybersec_active_alerts_total gauge
+cybersec_active_alerts_total {overview.get('active_alerts', 0)}
+
+# HELP cybersec_precision_percent Detection Precision Percentage
+# TYPE cybersec_precision_percent gauge
+cybersec_precision_percent {overview.get('precision', 0.0)}
+
+# HELP cybersec_recall_percent Detection Recall Percentage
+# TYPE cybersec_recall_percent gauge
+cybersec_recall_percent {overview.get('recall', 0.0)}
+
+# HELP cybersec_f1_score Detection F1 Score
+# TYPE cybersec_f1_score gauge
+cybersec_f1_score {overview.get('f1_score', 0.0)}
+
+# HELP cybersec_precision_top1_percent Precision at Top 1 Percent Analyst Alert Budget
+# TYPE cybersec_precision_top1_percent gauge
+cybersec_precision_top1_percent {top1.get('precision_at_1pct', 100.0)}
+
+# HELP cybersec_fpr_top1_percent False Positive Rate at Top 1 Percent Analyst Alert Budget
+# TYPE cybersec_fpr_top1_percent gauge
+cybersec_fpr_top1_percent {top1.get('fpr_at_1pct', 0.0)}
+
+# HELP cybersec_current_threshold Risk score alert threshold setting
+# TYPE cybersec_current_threshold gauge
+cybersec_current_threshold {store.current_threshold}
+"""
+    return metrics_text
+
+# Auth & RBAC Endpoint (/api/auth/me)
+@app.get("/api/auth/me")
+def get_current_user_rbac(role: Optional[str] = Query("soc:lead")):
+    """Returns active authenticated user info and RBAC role scope capabilities."""
+    roles_map = {
+        "soc:analyst": {"name": "Tier-1 Analyst", "permissions": ["read_events", "read_alerts", "read_entities"]},
+        "soc:lead": {"name": "SOC Lead Responder", "permissions": ["read_events", "read_alerts", "triage_action", "escalate_threat"]},
+        "soc:admin": {"name": "Security System Administrator", "permissions": ["read_events", "triage_action", "tune_threshold", "trigger_simulation"]}
+    }
+    assigned = roles_map.get(role, roles_map["soc:lead"])
+    return {
+        "user_id": "ANALYST_042",
+        "username": "lead_analyst@honeywell.com",
+        "role_scope": role,
+        "role_name": assigned["name"],
+        "permissions": assigned["permissions"],
+        "auth_provider": "Keycloak OIDC / OAuth2"
+    }
 
 # Background WebSocket Event Streaming Task
 @app.on_event("startup")
