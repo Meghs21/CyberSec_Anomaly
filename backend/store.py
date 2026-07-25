@@ -123,7 +123,7 @@ class DataStore:
             profiler.update_profile(ev_inference, inferred_risk_score=risk_score)
             sequence_detector.update_transitions_online(ev_inference, inferred_risk_score=risk_score)
 
-            is_alert = (risk_score >= self.current_threshold and tax_cat != "normal" and tax_cat != "insider_drift")
+            is_alert = (risk_score >= dynamic_thresh and tax_cat not in ["normal", "insider_drift"])
             
             existing_state = self.alert_states.get(alert_id, {
                 "status": "NEW",

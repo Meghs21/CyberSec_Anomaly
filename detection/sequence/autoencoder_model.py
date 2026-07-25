@@ -149,8 +149,27 @@ class SequenceAutoencoderDetector:
 
         return np.array(X)
 
+    def _build_dataset_windows(self, events):
+        """Groups events per entity_id, sorts by timestamp, and concatenates entity-isolated window matrices."""
+        from collections import defaultdict
+        entity_groups = defaultdict(list)
+        for e in events:
+            entity_groups[e["entity_id"]].append(e)
+
+        all_windows = []
+        for ent_id, ent_events in entity_groups.items():
+            # Sort entity events by timestamp
+            sorted_events = sorted(ent_events, key=lambda x: str(x.get("timestamp", "")))
+            win_mat = self._build_window_matrix(sorted_events)
+            if len(win_mat) > 0:
+                all_windows.append(win_mat)
+
+        if not all_windows:
+            return np.array([])
+        return np.vstack(all_windows)
+
     def fit_normal_baseline(self, events):
-        """Fits encoder scalers and autoencoder strictly on normal baseline events."""
+        """Fits encoder scalers and autoencoder strictly on normal baseline events grouped by entity."""
         normal_events = [e for e in events if "label" not in e or e.get("label") == "normal"]
         if len(normal_events) < self.window_k + 5:
             return
@@ -158,7 +177,8 @@ class SequenceAutoencoderDetector:
         events_clean = [{k: v for k, v in e.items() if k != "label"} for e in normal_events]
         self.encoder.fit(events_clean)
         
-        X_train = self._build_window_matrix(events_clean)
+        # Build entity-isolated training windows
+        X_train = self._build_dataset_windows(events_clean)
 
         if len(X_train) > 5:
             input_dim = X_train.shape[1]
