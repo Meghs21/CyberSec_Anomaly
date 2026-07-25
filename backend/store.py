@@ -245,6 +245,22 @@ class DataStore:
         df["date"] = df["timestamp"].apply(lambda x: str(x).split(" ")[0])
         time_series = df.groupby("date")["is_alert"].sum().to_dict()
 
+        # Severity breakdown for Splunk-style Donut chart
+        severity_counts = {
+            "CRITICAL": sum(1 for a in alerts if a["severity"] == "CRITICAL"),
+            "HIGH": sum(1 for a in alerts if a["severity"] == "HIGH"),
+            "MEDIUM": sum(1 for a in alerts if a["severity"] == "MEDIUM"),
+            "LOW": sum(1 for a in alerts if a["severity"] == "LOW")
+        }
+
+        # Calculate Top-1% Precision for quick metric tile
+        N = len(self.analyzed_events)
+        k_top1 = max(1, math.ceil(N * 0.01))
+        sorted_events = sorted(self.analyzed_events, key=lambda x: x["risk_score"], reverse=True)
+        top1_slice = sorted_events[:k_top1]
+        top1_tp = sum(1 for e in top1_slice if self.ground_truth_labels[e["id"]] in malicious_labels)
+        top1_p = (top1_tp / k_top1 * 100.0) if k_top1 > 0 else 0.0
+
         return {
             "total_events": len(self.analyzed_events),
             "active_alerts": len(alerts),
@@ -254,6 +270,8 @@ class DataStore:
             "precision": round(p, 1),
             "recall": round(r, 1),
             "f1_score": round(f1, 3),
+            "top1_precision": round(top1_p, 1),
+            "severity_counts": severity_counts,
             "alert_volume_timeseries": time_series,
             "current_threshold": self.current_threshold
         }

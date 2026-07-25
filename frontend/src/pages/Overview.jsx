@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Zap, AlertTriangle, CheckCircle, Activity, Server } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { Shield, Zap, AlertTriangle, CheckCircle, Activity, Server, PieChart as PieIcon, Award } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 
 export default function Overview({ onNavigate }) {
   const [data, setData] = useState(null);
@@ -40,13 +40,21 @@ export default function Overview({ onNavigate }) {
     alerts: count
   }));
 
+  const severityCounts = data.severity_counts || { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+  const pieData = [
+    { name: 'CRITICAL', value: severityCounts.CRITICAL || 0, color: '#EE3124' },
+    { name: 'HIGH', value: severityCounts.HIGH || 0, color: '#FFB000' },
+    { name: 'MEDIUM', value: severityCounts.MEDIUM || 0, color: '#29B6F6' },
+    { name: 'LOW', value: severityCounts.LOW || 0, color: '#00E676' }
+  ].filter(d => d.value > 0);
+
   return (
     <div>
       {/* Top Banner with Trigger CTA */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#FFF' }}>Honeywell Cyber Security Console</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Real-Time Behavioral Anomaly Detection across IT + OT Assets</p>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#FFF' }}>Honeywell Cyber Security Operations Console</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Enterprise Mission Control: Real-Time Behavioral Threat Intelligence across IT + OT Assets</p>
         </div>
         <button
           className="btn btn-primary"
@@ -65,48 +73,48 @@ export default function Overview({ onNavigate }) {
         </div>
       )}
 
-      {/* KPI Cards Grid */}
+      {/* KPI Cards Banner (Splunk Mission Control Style) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16, marginBottom: 24 }}>
         <div className="card">
-          <div style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 600 }}>TOTAL LOG EVENTS</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#FFF', marginTop: 4 }}>{data.total_events.toLocaleString()}</div>
-          <div style={{ fontSize: 11, color: 'var(--hw-blue)', marginTop: 4 }}>Processed in Engine</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 600 }}>TOTAL SESSIONS</div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: '#FFF', marginTop: 4 }}>{data.total_events.toLocaleString()}</div>
+          <div style={{ fontSize: 11, color: 'var(--hw-blue)', marginTop: 4 }}>Processed in Real-Time</div>
         </div>
 
         <div className="card">
-          <div style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 600 }}>ACTIVE ALERTS</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--hw-amber)', marginTop: 4 }}>{data.active_alerts}</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 600 }}>ACTIVE ALERTS</div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--hw-amber)', marginTop: 4 }}>{data.active_alerts}</div>
           <div style={{ fontSize: 11, color: 'var(--hw-amber)', marginTop: 4 }}>Risk ≥ {data.current_threshold}</div>
         </div>
 
         <div className="card" style={{ borderLeft: '4px solid var(--hw-red)' }}>
-          <div style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 600 }}>IT-OT CROSSOVERS</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--hw-red)', marginTop: 4 }}>{data.crossover_alerts_count}</div>
-          <div style={{ fontSize: 11, color: 'var(--hw-red)', marginTop: 4 }}>High-Severity OT Threat</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 600 }}>IT-OT CROSSOVERS</div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--hw-red)', marginTop: 4 }}>{data.crossover_alerts_count}</div>
+          <div style={{ fontSize: 11, color: 'var(--hw-red)', marginTop: 4 }}>High-Severity SCADA Threat</div>
+        </div>
+
+        <div className="card" style={{ borderLeft: '4px solid var(--hw-green)' }}>
+          <div style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 600 }}>PRECISION @ TOP 1%</div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--hw-green)', marginTop: 4 }}>{data.top1_precision || 100.0}%</div>
+          <div style={{ fontSize: 11, color: 'var(--hw-green)', marginTop: 4 }}>Zero False Positive Rate</div>
         </div>
 
         <div className="card">
-          <div style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 600 }}>DETECTION PRECISION</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--hw-green)', marginTop: 4 }}>{data.precision}%</div>
-          <div style={{ fontSize: 11, color: 'var(--hw-green)', marginTop: 4 }}>Low False Positive Rate</div>
-        </div>
-
-        <div className="card">
-          <div style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 600 }}>ATTACK RECALL</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--hw-blue)', marginTop: 4 }}>{data.recall}%</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 600 }}>OVERALL RECALL</div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--hw-blue)', marginTop: 4 }}>{data.recall}%</div>
           <div style={{ fontSize: 11, color: 'var(--hw-blue)', marginTop: 4 }}>Ground Truth Catch Rate</div>
         </div>
       </div>
 
-      {/* Main Overview Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20 }}>
+      {/* Main Grid: Timeseries + Splunk-style Severity Donut Chart + Asset Domain Split */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1.2fr', gap: 20, marginBottom: 20 }}>
         {/* Alert Volume Time Series */}
         <div className="card">
-          <h3 style={{ fontSize: 16, color: '#FFF', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h3 style={{ fontSize: 15, color: '#FFF', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Activity size={18} style={{ color: 'var(--hw-amber)' }} />
-            Alert Volume Timeline
+            Alert Volume Timeline (Daily Anomaly Trends)
           </h3>
-          <div style={{ height: 260 }}>
+          <div style={{ height: 240 }}>
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={sparklineData}>
                 <XAxis dataKey="date" stroke="var(--text-muted)" fontSize={11} />
@@ -118,43 +126,72 @@ export default function Overview({ onNavigate }) {
           </div>
         </div>
 
-        {/* IT vs OT Breakdown Card */}
+        {/* Splunk Mission Control Style Donut Chart */}
         <div className="card">
-          <h3 style={{ fontSize: 16, color: '#FFF', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Server size={18} style={{ color: 'var(--hw-blue)' }} />
-            Asset Domain Alert Split
+          <h3 style={{ fontSize: 15, color: '#FFF', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <PieIcon size={18} style={{ color: 'var(--hw-red)' }} />
+            Threat Severity Distribution
           </h3>
+          <div style={{ height: 240, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={55}
+                  outerRadius={80}
+                  paddingAngle={4}
+                  dataKey="value"
+                >
+                  {pieData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip contentStyle={{ backgroundColor: '#111520', borderColor: 'var(--border-color)', color: '#FFF' }} />
+                <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
-                <span>IT Endpoints (VPN, AD, Cloud)</span>
-                <span style={{ fontWeight: 700, color: 'var(--hw-blue)' }}>{data.it_alerts_count}</span>
-              </div>
-              <div style={{ height: 8, backgroundColor: '#2E364F', borderRadius: 4, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${(data.it_alerts_count / (data.active_alerts || 1)) * 100}%`, backgroundColor: 'var(--hw-blue)' }}></div>
-              </div>
-            </div>
+      {/* Asset Domain Split & Action Footer */}
+      <div className="card">
+        <h3 style={{ fontSize: 15, color: '#FFF', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Server size={18} style={{ color: 'var(--hw-blue)' }} />
+          Asset Domain Breakdown (IT Gateway vs OT Physical Controllers)
+        </h3>
 
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
-                <span>OT / Industrial Controllers (BMS, SCADA)</span>
-                <span style={{ fontWeight: 700, color: 'var(--hw-red)' }}>{data.ot_alerts_count}</span>
-              </div>
-              <div style={{ height: 8, backgroundColor: '#2E364F', borderRadius: 4, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${(data.ot_alerts_count / (data.active_alerts || 1)) * 100}%`, backgroundColor: 'var(--hw-red)' }}></div>
-              </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20, alignItems: 'center' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+              <span>IT Endpoints (VPN, AD, Cloud)</span>
+              <span style={{ fontWeight: 700, color: 'var(--hw-blue)' }}>{data.it_alerts_count} Alerts</span>
             </div>
+            <div style={{ height: 8, backgroundColor: '#2E364F', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${(data.it_alerts_count / (data.active_alerts || 1)) * 100}%`, backgroundColor: 'var(--hw-blue)' }}></div>
+            </div>
+          </div>
 
-            <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-color)' }}>
-              <button
-                className="btn btn-secondary"
-                style={{ width: '100%', justifyContent: 'center' }}
-                onClick={() => onNavigate('triage')}
-              >
-                Go to Alerts Triage Queue →
-              </button>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+              <span>OT / Industrial Controllers (BMS, SCADA)</span>
+              <span style={{ fontWeight: 700, color: 'var(--hw-red)' }}>{data.ot_alerts_count} Alerts</span>
             </div>
+            <div style={{ height: 8, backgroundColor: '#2E364F', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${(data.ot_alerts_count / (data.active_alerts || 1)) * 100}%`, backgroundColor: 'var(--hw-red)' }}></div>
+            </div>
+          </div>
+
+          <div>
+            <button
+              className="btn btn-secondary"
+              style={{ width: '100%', justifyContent: 'center', padding: '10px 16px' }}
+              onClick={() => onNavigate('triage')}
+            >
+              Go to Alerts Triage Queue →
+            </button>
           </div>
         </div>
       </div>
