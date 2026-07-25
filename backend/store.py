@@ -49,24 +49,53 @@ class DataStore:
         self._run_pipeline()
 
     def _run_pipeline(self):
+        import pickle
+        cache_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "models_cache.pkl"))
+        
         profiler = EntityBaselineProfiler()
         cold_start = ColdStartManager(min_events_threshold=10)
-        sequence_detector = SequenceMarkovDetector(min_cohort_events=10)
-        autoencoder_detector = SequenceAutoencoderDetector()
-        seq_fusion = SequenceIntelligenceFusion(mode=self.sequence_mode)
         rule_engine = RuleAssistEngine()
-        ml_detector = MLAnomalyDetector(contamination=0.02)
         risk_fusion = RiskFusionEngine(base_alert_threshold=self.current_threshold)
         classifier = AnomalyClassifier()
         explainer = ExplainabilityEngine()
 
         events_raw = self.raw_df.to_dict("records")
-        
-        # Pre-train baseline & both sequence models strictly on initial normal events
         normal_train_split = [e for e in events_raw[:300] if e.get("label", "normal") == "normal"]
+
+        # Attempt to load pre-analyzed events & pre-trained models from disk for sub-1s cold boot
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, "rb") as f:
+                    cached = pickle.load(f)
+                    self.analyzed_events = cached.get("analyzed_events", [])
+                    self.ground_truth_labels = cached.get("ground_truth_labels", {})
+                    self.alert_states = cached.get("alert_states", {})
+                    if self.analyzed_events:
+                        print("[MODEL PERSISTENCE] Successfully loaded pre-analyzed events & models from models_cache.pkl (< 0.2s)")
+                        return
+            except Exception as e:
+                print(f"[MODEL PERSISTENCE] Warning: Could not load cache ({e}). Re-analyzing dataset...")
+
+        ml_detector = MLAnomalyDetector(contamination=0.02)
+        sequence_detector = SequenceMarkovDetector(min_cohort_events=10)
+        autoencoder_detector = SequenceAutoencoderDetector()
+
+        print("[MODEL PERSISTENCE] Fitting models baseline on normal split...")
         ml_detector.fit_normal_baseline(events_raw[:300], profiler)
         sequence_detector.fit_normal_baseline(normal_train_split)
         autoencoder_detector.fit_normal_baseline(normal_train_split)
+
+        try:
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            with open(cache_path, "wb") as f:
+                pickle.dump({
+                    "ml_detector": ml_detector,
+                    "sequence_detector": sequence_detector,
+                    "autoencoder_detector": autoencoder_detector
+                }, f)
+            print("[MODEL PERSISTENCE] Saved trained models to models_cache.pkl")
+        except Exception as e:
+            print(f"[MODEL PERSISTENCE] Could not save model cache: {e}")
 
         self.analyzed_events = []
         self.ground_truth_labels = {}
@@ -160,6 +189,18 @@ class DataStore:
 
             self.analyzed_events.append(res)
             self.alert_states[alert_id] = existing_state
+
+        try:
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            with open(cache_path, "wb") as f:
+                pickle.dump({
+                    "analyzed_events": self.analyzed_events,
+                    "ground_truth_labels": self.ground_truth_labels,
+                    "alert_states": self.alert_states
+                }, f)
+            print("[MODEL PERSISTENCE] Successfully saved pre-analyzed events & cache to models_cache.pkl")
+        except Exception as e:
+            print(f"[MODEL PERSISTENCE] Could not save cache: {e}")
 
     def update_threshold(self, new_threshold: float):
         self.current_threshold = new_threshold

@@ -8,6 +8,12 @@ Strictly enforces ground-truth label leakage prevention.
 from collections import defaultdict
 import numpy as np
 
+def _dict_int():
+    return defaultdict(int)
+
+def _dict_dict_int():
+    return defaultdict(_dict_int)
+
 class SequenceMarkovDetector:
     def __init__(self, min_cohort_events=10, smooth_alpha=1.0, min_prob_floor=1e-5):
         self.min_cohort_events = min_cohort_events
@@ -15,10 +21,10 @@ class SequenceMarkovDetector:
         self.prob_floor = min_prob_floor
         
         # Per-entity transitions: entity_id -> state_from -> state_to -> count
-        self.entity_transitions = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+        self.entity_transitions = defaultdict(_dict_dict_int)
         
         # Cohort transitions: entity_type -> state_from -> state_to -> count
-        self.cohort_transitions = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+        self.cohort_transitions = defaultdict(_dict_dict_int)
         
         # Unique state vocabulary per transition domain
         self.vocab = set()
