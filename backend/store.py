@@ -209,7 +209,8 @@ class DataStore:
 
             # 8. Anti-Poisoning Concept Drift & Sequence Transition Updates
             profiler.update_profile(ev_inference, inferred_risk_score=risk_score)
-            sequence_detector.update_transitions_online(ev_inference, inferred_risk_score=risk_score)
+            prev_ev_for_update = entity_histories[entity_id][-2] if len(entity_histories[entity_id]) >= 2 else None
+            sequence_detector.update_transitions_online(ev_inference, inferred_risk_score=risk_score, prev_event=prev_ev_for_update)
 
             is_alert = (risk_score >= dynamic_thresh and tax_cat not in ["normal", "insider_drift"])
             

@@ -118,7 +118,7 @@ class SequenceMarkovDetector:
         normalized_score = min(1.0, max(0.0, (mean_neg_log - 1.0) / 7.0))
         return round(float(normalized_score), 3)
 
-    def update_transitions_online(self, event, inferred_risk_score, trust_threshold=45.0):
+    def update_transitions_online(self, event, inferred_risk_score, prev_event=None, trust_threshold=45.0):
         """Online update of transitions for low-risk observations (anti-poisoning)."""
         assert "label" not in event, "LABEL LEAKAGE DETECTED: Ground-truth 'label' must be removed before online updates!"
         
@@ -127,7 +127,14 @@ class SequenceMarkovDetector:
             
         entity_id = event["entity_id"]
         entity_type = event.get("entity_type", "user")
-        states = self._extract_states(event)
+        curr_states = self._extract_states(event)
+
+        if prev_event:
+            prev_clean = {k: v for k, v in prev_event.items() if k != "label"}
+            prev_state = f"{prev_clean.get('resource_accessed')}:{prev_clean.get('auth_method')}"
+            states = [prev_state] + curr_states
+        else:
+            states = curr_states
         
         for i in range(len(states) - 1):
             s_from, s_to = states[i], states[i+1]
