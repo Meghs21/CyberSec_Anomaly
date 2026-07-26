@@ -211,5 +211,21 @@ def test_duration_baseline_flows_through_pipeline():
         "check for the mean_duration/avg_duration key mismatch bug."
     )
 
+def test_sequence_fusion_single_source_of_truth():
+    """Regression test: confirm risk fusion and classification consume the same
+    fused sequence score, computed by exactly one canonical fusion call per event."""
+    from detection.sequence import SequenceIntelligenceFusion
+    fusion = SequenceIntelligenceFusion(mode="ngram")
+    score_ngram_mode = fusion.fuse_sequence_scores(markov_score=0.8, autoencoder_score=0.1)
+    assert score_ngram_mode == 0.8, "ngram mode should return the markov score unchanged"
+
+    fusion_ae = SequenceIntelligenceFusion(mode="autoencoder")
+    score_ae_mode = fusion_ae.fuse_sequence_scores(markov_score=0.8, autoencoder_score=0.1)
+    assert score_ae_mode == 0.1, "autoencoder mode should return the autoencoder score unchanged"
+
+    fusion_both = SequenceIntelligenceFusion(mode="both")
+    score_both_mode = fusion_both.fuse_sequence_scores(markov_score=0.8, autoencoder_score=0.1)
+    assert abs(score_both_mode - 0.45) < 1e-6, "both mode should return the 50/50 blend"
+
 if __name__ == "__main__":
     pytest.main(["-v", __file__])

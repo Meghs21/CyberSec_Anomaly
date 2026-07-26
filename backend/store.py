@@ -35,6 +35,7 @@ class DataStore:
         self.alert_states = {}         # alert_id -> {status, notes}
         self.current_threshold = 60.0
         self.sequence_mode = sequence_mode or os.getenv("SEQUENCE_MODEL_MODE", "ngram").lower()
+        self.seq_fusion = SequenceIntelligenceFusion(mode=self.sequence_mode)
         self.db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "honeywell_cyber.db"))
         self._init_sqlite_db()
         self.load_and_process_data()
@@ -191,20 +192,22 @@ class DataStore:
             ngram_score = sequence_detector.calculate_sequence_score(ev_inference, personal_profile, prev_event=prev_ev)
             ae_score, ae_mse, ae_attr = autoencoder_detector.calculate_autoencoder_score(ev_inference, entity_histories[entity_id])
 
-            # 5. Risk Score Fusion (Supports 3-way toggle: 'ngram', 'autoencoder', 'both')
+            # 5. Sequence Score Fusion (Single Source of Truth: SequenceIntelligenceFusion)
+            fused_seq_score = self.seq_fusion.fuse_sequence_scores(ngram_score, ae_score)
+
+            # 6. Risk Score Fusion
             risk_score, severity, dynamic_thresh = risk_fusion.fuse_risk_score(
-                ev_inference, rule_signals, ml_score, ngram_score, ae_score, effective_baseline, sequence_mode=self.sequence_mode
+                ev_inference, rule_signals, ml_score, fused_seq_score, effective_baseline
             )
 
-            # 6. Attack Classification (Stage 2)
-            effective_seq_score = ae_score if self.sequence_mode == "autoencoder" else (0.5*ngram_score + 0.5*ae_score if self.sequence_mode == "both" else ngram_score)
+            # 7. Attack Classification (Stage 2)
             tax_cat, attack_cat = classifier.classify_anomaly(
-                ev_inference, rule_signals, feat_vec, effective_seq_score, effective_baseline, risk_score
+                ev_inference, rule_signals, feat_vec, fused_seq_score, effective_baseline, risk_score
             )
 
-            # 7. Explainability Attribution (Deliverable #5)
+            # 8. Explainability Attribution (Deliverable #5)
             reason = explainer.generate_explanation(
-                ev_inference, rule_signals, feat_vec, effective_seq_score, effective_baseline, tax_cat
+                ev_inference, rule_signals, feat_vec, fused_seq_score, effective_baseline, tax_cat
             )
 
             # 8. Anti-Poisoning Concept Drift & Sequence Transition Updates
