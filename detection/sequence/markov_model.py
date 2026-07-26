@@ -54,24 +54,23 @@ class SequenceMarkovDetector:
 
         for entity_id, ent_events in entity_groups.items():
             sorted_events = sorted(ent_events, key=lambda x: str(x.get("timestamp", "")))
-            
+
             for i, ev in enumerate(sorted_events):
                 entity_type = ev.get("entity_type", "user")
-                states = self._extract_states(ev)
-                
-                # Intra-event command sequence transitions
+                curr_states = self._extract_states(ev)
+
+                if i > 0:
+                    prev_ev = sorted_events[i - 1]
+                    prev_state = f"{prev_ev.get('resource_accessed')}:{prev_ev.get('auth_method')}"
+                    states = [prev_state] + curr_states
+                else:
+                    states = curr_states
+
+                # Walk the FULL combined chain — same shape as calculate_sequence_score() builds at inference
                 for j in range(len(states) - 1):
-                    s_from, s_to = states[j], states[j+1]
+                    s_from, s_to = states[j], states[j + 1]
                     self.entity_transitions[entity_id][s_from][s_to] += 1
                     self.cohort_transitions[entity_type][s_from][s_to] += 1
-                
-                # Inter-event session transition (from prev event to curr event)
-                if i > 0:
-                    prev_ev = sorted_events[i-1]
-                    prev_state = f"{prev_ev.get('resource_accessed')}:{prev_ev.get('auth_method')}"
-                    curr_state = f"{ev.get('resource_accessed')}:{ev.get('auth_method')}"
-                    self.entity_transitions[entity_id][prev_state][curr_state] += 1
-                    self.cohort_transitions[entity_type][prev_state][curr_state] += 1
 
     def calculate_sequence_score(self, event, entity_profile, prev_event=None):
         """
