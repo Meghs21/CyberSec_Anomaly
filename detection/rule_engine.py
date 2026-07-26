@@ -50,13 +50,15 @@ class RuleAssistEngine:
 
         geo_str = event.get("geo_location", "")
         curr_lat, curr_lon = None, None
-        if "(" in geo_str and ")" in geo_str:
-            try:
-                coords = geo_str.split("(")[1].split(")")[0].split(",")
-                curr_lat = float(coords[0].strip())
-                curr_lon = float(coords[1].strip())
-            except Exception:
-                pass
+        if geo_str:
+            import re
+            match = re.search(r"\((-?\d+\.\d+),\s*(-?\d+\.\d+)\)", geo_str)
+            if match:
+                try:
+                    curr_lat = float(match.group(1))
+                    curr_lon = float(match.group(2))
+                except Exception:
+                    pass
 
         if last_ts and last_lat is not None and last_lon is not None and curr_lat is not None and curr_lon is not None:
             try:
@@ -80,7 +82,7 @@ class RuleAssistEngine:
         auth_method = event.get("auth_method", "")
         cmd_seq = event.get("command_sequence", "")
 
-        if "auth_failed" in cmd_seq or "failure" in auth_method.lower():
+        if "auth_failed" in cmd_seq or "auth_failure" in cmd_seq or "fail" in cmd_seq.lower() or "failure" in auth_method.lower():
             self.ip_failure_counts[src_ip] += 1
             self.ip_target_history[src_ip].add(entity_id)
 
@@ -111,7 +113,7 @@ class RuleAssistEngine:
             rule_signals["off_hours_flag"] = True
 
         mb = float(event.get("mb_transferred", 0.0))
-        if rule_signals["off_hours_flag"] and 50.0 <= mb <= 300.0 and "exfil" in cmd_seq.lower():
+        if rule_signals["off_hours_flag"] and 10.0 <= mb <= 300.0 and "exfil" in cmd_seq.lower():
             rule_signals["low_slow_exfil_flag"] = True
 
         return rule_signals

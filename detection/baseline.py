@@ -74,13 +74,15 @@ class EntityBaselineProfiler:
             prof["last_seen_timestamp"] = timestamp
             # Parse lat/lon from geo_location string if formatted like "Location (lat, lon)"
             geo_str = event.get("geo_location", "")
-            if "(" in geo_str and ")" in geo_str:
-                try:
-                    coords = geo_str.split("(")[1].split(")")[0].split(",")
-                    prof["last_seen_lat"] = float(coords[0].strip())
-                    prof["last_seen_lon"] = float(coords[1].strip())
-                except Exception:
-                    pass
+            if geo_str:
+                import re
+                match = re.search(r"\((-?\d+\.\d+),\s*(-?\d+\.\d+)\)", geo_str)
+                if match:
+                    try:
+                        prof["last_seen_lat"] = float(match.group(1))
+                        prof["last_seen_lon"] = float(match.group(2))
+                    except Exception:
+                        pass
             prof["recent_failed_logins"] = 0
         else:
             prof["recent_failed_logins"] += 1

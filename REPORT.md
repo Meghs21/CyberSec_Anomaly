@@ -33,21 +33,21 @@ The system strictly complies with every item of the official HirePro assessment 
 
 ---
 
-## 1. Official Data Schema (11 Fields)
+### 1. Official 11-Field Telemetry Schema Enforcement
+The system enforces strict compliance with the **11-field official telemetry schema**:
+1. `entity_id` (Unique identifier for user, service account, or device)
+2. `entity_type` (`user` / `service_account` / `edge_device`)
+3. `timestamp` (`YYYY-MM-DD HH:MM:SS` chronological event timestamp)
+4. `source_ip` (IPv4 source address)
+5. `geo_location` (Location string with exact GPS coordinates: `Location_Name (lat, lon)`)
+6. `resource_accessed` (Target IT Cloud or OT SCADA resource)
+7. `auth_method` (`password` / `token` / `certificate` / `biometric`)
+8. `session_duration` (Session connection length in seconds)
+9. `command_sequence` (Ordered execution token chain)
+10. `device_fingerprint` (Operating system, MAC address, and protocol footprint)
+11. `label` (Ground-truth scenario label; hidden at inference boundary)
 
-The synthetic data generator produces log records matching the exact 11-field official specification:
-
-1. `entity_id`: Unique identifier for user or device (`USR_001`, `DEV_042`).
-2. `entity_type`: Category of entity (`user`, `service_account`, `edge_device`).
-3. `timestamp`: ISO 8601 connection time (`YYYY-MM-DD HH:MM:SS`).
-4. `source_ip`: Originating IPv4 address.
-5. `geo_location`: Geographic location string and lat/lon coordinates.
-6. `resource_accessed`: Target endpoint, cloud app, BMS controller, or SCADA HMI.
-7. `auth_method`: Authentication protocol (`password`, `token`, `certificate`, `biometric`).
-8. `session_duration`: Active connection duration in seconds.
-9. `command_sequence`: Ordered sequence of session actions (`login -> vpn_connect -> pull`).
-10. `device_fingerprint`: OS version, MAC address, and protocol details.
-11. `label`: Ground-truth tag (`normal`, `brute_force`, `impossible_travel`, `credential_stuffing`, `lateral_movement`, `device_spoofing`, `low_and_slow_exfiltration`, `insider_drift`).
+*Documented Extensions*: The dataset presents the required 11-field official schema exactly in primary column order, extended with 3 additional engineered trailing fields (`role`, `domain`, `mb_transferred`) used internally by the detection pipeline for IT/OT domain tagging and exfiltration-volume analysis — these are supplementary extensions and not a deviation from the required schema.
 
 ---
 

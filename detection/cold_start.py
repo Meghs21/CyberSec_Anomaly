@@ -56,7 +56,7 @@ class ColdStartManager:
         avg_mb = (1.0 - weight) * cohort["avg_mb"] + weight * avg_mb_personal
         std_mb = (1.0 - weight) * cohort["std_mb"] + weight * max(10.0, personal_profile.get("std_mb", 20.0))
 
-        return {
+        effective = {
             "baseline_type": "personal" if weight >= 1.0 else "blended",
             "weight_personal": round(weight, 2),
             "avg_hour": float(avg_h),
@@ -64,3 +64,15 @@ class ColdStartManager:
             "avg_mb": float(avg_mb),
             "std_mb": float(std_mb)
         }
+
+        if personal_profile:
+            effective.update({
+                "last_seen_timestamp": personal_profile.get("last_seen_timestamp"),
+                "last_seen_lat": personal_profile.get("last_seen_lat"),
+                "last_seen_lon": personal_profile.get("last_seen_lon"),
+                "recent_failed_logins": personal_profile.get("recent_failed_logins", 0),
+                "known_devices": personal_profile.get("known_devices", set()),
+                "known_resources": personal_profile.get("known_resources", set())
+            })
+
+        return effective
