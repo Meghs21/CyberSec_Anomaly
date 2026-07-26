@@ -16,15 +16,20 @@ class RiskFusionEngine:
         """
         assert "label" not in event, "LABEL LEAKAGE DETECTED: Ground-truth 'label' field must be removed before risk fusion!"
 
+        dynamic_threshold = (
+            self.base_threshold + 10.0 if baseline_stats.get("baseline_type") == "cohort"
+            else self.base_threshold
+        )
+
         # Hard overrides for severe deterministic rules
         if rule_signals.get("impossible_travel_flag"):
-            return 98.0, "CRITICAL", 50.0
+            return 98.0, "CRITICAL", dynamic_threshold
 
         if rule_signals.get("brute_force_flag"):
-            return 92.0, "CRITICAL", 50.0
+            return 92.0, "CRITICAL", dynamic_threshold
 
         if rule_signals.get("credential_stuffing_flag"):
-            return 94.0, "CRITICAL", 50.0
+            return 94.0, "CRITICAL", dynamic_threshold
 
         # Base score from ML anomaly model & fused sequence score
         base_risk = min(50.0, max(0.0, ml_score * 20.0)) + (sequence_score * 30.0)
@@ -40,12 +45,6 @@ class RiskFusionEngine:
             base_risk += 35.0
         elif rule_signals.get("off_hours_flag"):
             base_risk += 15.0
-
-        # Dynamic threshold adjusting for cold-start entities
-        if baseline_stats.get("baseline_type") == "cohort":
-            dynamic_threshold = self.base_threshold + 10.0  # Conservative higher threshold for cold-start
-        else:
-            dynamic_threshold = self.base_threshold
 
         final_risk = round(float(min(100.0, max(0.0, base_risk))), 1)
 
