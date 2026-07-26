@@ -4,15 +4,16 @@ Production-Grade Sequence Intelligence Subsystem: Behavioral Neural Autoencoder.
 Key Improvements Implemented:
 1. Frozen Categorical Vocabulary: Vocabularies frozen post-training; unseen items map to explicit UNKNOWN bucket without state mutation.
 2. Non-Ordinal Categorical One-Hot Encoding: Eliminates artificial ordinal distance between resources/roles.
-3. Learned Feature Normalization: MinMaxScaler fit strictly on training split (no hardcoded divisors).
-4. Schema Expansion: Integrates entity_type, auth_method, and session features from official 11-field schema.
-5. Calibrated Percentile Thresholding: Score calibrated relative to 95th percentile (P95) of training reconstruction MSE.
-6. Per-Feature Reconstruction Attribution: Exposes feature-wise reconstruction error breakdown for explainability.
-7. Architectural Separation: BehavioralFeatureEncoder separated from SequenceAutoencoderDetector.
-8. Event Edge Padding: Short event histories padded by repeating earliest event instead of artificial zeros.
+3. Domain-Aware Resource Vocabulary: Selects Top 3 IT + Top 3 OT resources + UNKNOWN bucket (7 dims), preserving OT resource identity.
+4. Learned Feature Normalization: MinMaxScaler fit strictly on training split (no hardcoded divisors).
+5. Schema Expansion: Integrates entity_type, auth_method, and session features from official 11-field schema.
+6. Calibrated Percentile Thresholding: Score calibrated relative to 95th percentile (P95) of training reconstruction MSE.
+7. Per-Feature Reconstruction Attribution: Exposes feature-wise reconstruction error breakdown for explainability.
+8. Architectural Separation: BehavioralFeatureEncoder separated from SequenceAutoencoderDetector.
+9. Event Edge Padding: Short event histories padded by repeating earliest event instead of artificial zeros.
 
 Architecture:
-  Input (80 features: 5 events x 16-dim encoded vectors)
+  Input (95 features: 5 events x 19-dim encoded vectors)
     │
     ▼
   Dense Encoder (32 units)
@@ -24,7 +25,7 @@ Architecture:
   Dense Decoder (32 units)
     │
     ▼
-  Reconstruction Output (80 features)
+  Reconstruction Output (95 features)
 """
 
 import math
@@ -50,7 +51,7 @@ class BehavioralFeatureEncoder:
         self.entity_types = ["user", "service_account", "edge_device"]
 
     def fit(self, events):
-        """Learns resource vocabulary and numerical feature scalers from training normal split."""
+        """Learns domain-aware (Top 3 IT + Top 3 OT) resource vocabulary and numerical feature scalers from training normal split."""
         res_counts = {}
         numerical_feats = []
 
@@ -63,8 +64,20 @@ class BehavioralFeatureEncoder:
             mb = float(e.get("mb_transferred", 50.0))
             numerical_feats.append([dur, mb])
 
-        # Top 5 resources + UNKNOWN bucket
-        top_res = sorted(res_counts.keys(), key=lambda r: res_counts[r], reverse=True)[:5]
+        # Domain-aware vocabulary: Top 3 IT + Top 3 OT resources + UNKNOWN bucket
+        it_candidates = ["Corporate_VPN", "Active_Directory", "Workday", "GitHub_Enterprise", "AWS_Console", "Jira_Cloud"]
+        ot_candidates = ["Honeywell_Forge_Gateway", "BMS_Controller_HVAC_01", "BMS_Controller_Lighting_02", 
+                         "SCADA_HMI_Workstation_01", "Access_Control_Gateway_03", "Industrial_PLC_Substation_01"]
+
+        top_it = sorted([r for r in res_counts if r in it_candidates], key=lambda r: res_counts[r], reverse=True)[:3]
+        top_ot = sorted([r for r in res_counts if r in ot_candidates], key=lambda r: res_counts[r], reverse=True)[:3]
+        
+        # If candidates absent, fall back to global counts
+        if not top_it or not top_ot:
+            top_res = sorted(res_counts.keys(), key=lambda r: res_counts[r], reverse=True)[:6]
+        else:
+            top_res = list(dict.fromkeys(top_it + top_ot))[:6]
+
         self.known_resources = top_res
         self.resource_to_idx = {r: i for i, r in enumerate(top_res)}
         
@@ -74,7 +87,7 @@ class BehavioralFeatureEncoder:
         self.is_frozen = True  # Freeze encoder state to prevent inference leakage/mutation
 
     def encode_event(self, event):
-        """Encodes a single event into a 16-dimensional vector."""
+        """Encodes a single event into a 19-dimensional vector."""
         assert "label" not in event, "LABEL LEAKAGE DETECTED: Ground-truth 'label' must be removed before encoding!"
 
         ts = event.get("timestamp", "2026-07-25 12:00:00")
@@ -99,7 +112,7 @@ class BehavioralFeatureEncoder:
         et = event.get("entity_type", "user").lower()
         et_vec = [1.0 if et == t else 0.0 for t in self.entity_types]
 
-        # Resource One-Hot with UNKNOWN bucket (6 dims: 5 known + 1 unknown)
+        # Domain-Aware Resource One-Hot with UNKNOWN bucket (7 dims: 6 known + 1 unknown)
         res = event.get("resource_accessed", "unknown")
         res_vec = [0.0] * (len(self.known_resources) + 1)
         if res in self.resource_to_idx:
@@ -110,7 +123,7 @@ class BehavioralFeatureEncoder:
         cmd_seq = event.get("command_sequence", "").lower()
         auth_fail = 1.0 if ("fail" in cmd_seq or "error" in cmd_seq) else 0.0
 
-        # Vector dim = 2 (hour) + 2 (num) + 4 (auth) + 3 (entity) + 6 (resource) + 1 (fail) = 18 dims
+        # Vector dim = 2 (hour) + 2 (num) + 4 (auth) + 3 (entity) + 7 (resource) + 1 (fail) = 19 dims
         return [sin_h, cos_h, dur_norm, mb_norm] + am_vec + et_vec + res_vec + [auth_fail]
 
 
@@ -119,7 +132,6 @@ class SequenceAutoencoderDetector:
         self.window_k = WINDOW_K
         self.encoder = BehavioralFeatureEncoder()
         
-        # Will be determined post-fit
         self.model = None
         self.hidden_layer_sizes = hidden_layer_sizes
         self.max_iter = max_iter
@@ -133,10 +145,9 @@ class SequenceAutoencoderDetector:
     def _build_window_matrix(self, events):
         """Builds window matrix with edge padding for short histories."""
         vecs = [self.encoder.encode_event(e) for e in events]
-        feature_dim = len(vecs[0]) if vecs else 18
+        feature_dim = len(vecs[0]) if vecs else 19
 
         if len(vecs) < self.window_k:
-            # Edge padding: repeat earliest event instead of artificial zeros
             first_vec = vecs[0] if vecs else [0.0] * feature_dim
             pad = [first_vec] * (self.window_k - len(vecs))
             vecs = pad + vecs
@@ -158,7 +169,6 @@ class SequenceAutoencoderDetector:
 
         all_windows = []
         for ent_id, ent_events in entity_groups.items():
-            # Sort entity events by timestamp
             sorted_events = sorted(ent_events, key=lambda x: str(x.get("timestamp", "")))
             win_mat = self._build_window_matrix(sorted_events)
             if len(win_mat) > 0:
@@ -177,7 +187,6 @@ class SequenceAutoencoderDetector:
         events_clean = [{k: v for k, v in e.items() if k != "label"} for e in normal_events]
         self.encoder.fit(events_clean)
         
-        # Build entity-isolated training windows
         X_train = self._build_dataset_windows(events_clean)
 
         if len(X_train) > 5:
@@ -236,7 +245,7 @@ class SequenceAutoencoderDetector:
         mse = float(np.mean(diff_sq))
 
         # Per-Feature Reconstruction Error Breakdown for Explainability
-        # Vector layout: [0,1: hour], [2,3: num], [4-7: auth], [8-10: entity], [11-16: res], [17: fail]
+        # Vector layout (19 dims): [0,1: hour], [2,3: num], [4-7: auth], [8-10: entity], [11-17: res (7 dims)], [18: fail]
         diff_reshaped = diff_sq.reshape(self.window_k, -1)
         last_event_diff = diff_reshaped[-1]
         
@@ -244,7 +253,7 @@ class SequenceAutoencoderDetector:
             "time_hour_error": float(np.mean(last_event_diff[0:2])),
             "session_volume_error": float(np.mean(last_event_diff[2:4])),
             "auth_error": float(np.mean(last_event_diff[4:8])),
-            "resource_error": float(np.mean(last_event_diff[11:17]))
+            "resource_error": float(np.mean(last_event_diff[11:18]))
         }
         
         # Calibrated relative to 95th percentile (P95) of training reconstruction MSE

@@ -63,17 +63,17 @@ Sequence Intelligence Subsystem
 │   └── Explicit transition probabilities, fast inference, highly interpretable
 │
 └── Behavioral Autoencoder (detection/sequence/autoencoder_model.py)
-    └── 30 -> 16 -> 8-dim latent bottleneck -> 16 -> 30 reconstruction error
+    └── 95 -> 32 -> 16-dim latent bottleneck -> 32 -> 95 reconstruction error
 ```
 
 ### Latent Bottleneck Justification:
-The Neural Autoencoder processes fixed-length behavioral windows ($K=5$ events $\times$ 6 features $= 30$-dimensional input):
-$$\mathbf{x} \in \mathbb{R}^{30} \to \text{Dense}(16) \to \mathbf{z} \in \mathbb{R}^{8} \text{ (Latent Bottleneck)} \to \text{Dense}(16) \to \mathbf{\hat{x}} \in \mathbb{R}^{30}$$
+The Neural Autoencoder processes fixed-length behavioral windows ($K=5$ events $\times$ 19-dim encoded vectors $= 95$-dimensional input):
+$$\mathbf{x} \in \mathbb{R}^{95} \to \text{Dense}(32) \to \mathbf{z} \in \mathbb{R}^{16} \text{ (Latent Bottleneck)} \to \text{Dense}(32) \to \mathbf{\hat{x}} \in \mathbb{R}^{95}$$
 
-The **8-dimensional bottleneck** forces compression of normal behavioral patterns into a compact latent space. Sessions with unusual sequence combinations produce high reconstruction MSE error:
-$$\text{MSE}(\mathbf{x}, \mathbf{\hat{x}}) = \frac{1}{30} \sum_{i=1}^{30} (x_i - \hat{x}_i)^2$$
+The **16-dimensional bottleneck** forces compression of normal IT and OT behavioral patterns into a compact latent space. Sessions with unusual sequence combinations produce high reconstruction MSE error:
+$$\text{MSE}(\mathbf{x}, \mathbf{\hat{x}}) = \frac{1}{95} \sum_{i=1}^{95} (x_i - \hat{x}_i)^2$$
 
-Anomalous sequences demonstrate a **4.66x higher MSE reconstruction loss** compared to normal baseline traffic (`0.32378` vs `0.06945`).
+Anomalous sequences demonstrate a **5.22x higher MSE reconstruction loss** compared to normal baseline traffic (`0.52576` vs `0.10071`).
 
 ---
 

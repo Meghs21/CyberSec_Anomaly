@@ -71,15 +71,15 @@ flowchart TD
 
 ## Latent Bottleneck Mathematical Justification
 
-The **Behavioral Autoencoder** (`detection/sequence/autoencoder_model.py`) models sequence context over fixed-length event windows ($K=5$ events $\times$ 6 features $= 30$-dimensional input):
+The **Behavioral Autoencoder** (`detection/sequence/autoencoder_model.py`) models sequence context over fixed-length event windows ($K=5$ events $\times$ 19-dim encoded vectors $= 95$-dimensional input):
 
-$$\mathbf{x} \in \mathbb{R}^{30} \xrightarrow{\text{Encoder}} \mathbf{h} \in \mathbb{R}^{16} \xrightarrow{\text{Bottleneck}} \mathbf{z} \in \mathbb{R}^{8} \xrightarrow{\text{Decoder}} \mathbf{h}' \in \mathbb{R}^{16} \xrightarrow{\text{Reconstruction}} \mathbf{\hat{x}} \in \mathbb{R}^{30}$$
+$$\mathbf{x} \in \mathbb{R}^{95} \xrightarrow{\text{Encoder}} \mathbf{h} \in \mathbb{R}^{32} \xrightarrow{\text{Bottleneck}} \mathbf{z} \in \mathbb{R}^{16} \xrightarrow{\text{Decoder}} \mathbf{h}' \in \mathbb{R}^{32} \xrightarrow{\text{Reconstruction}} \mathbf{\hat{x}} \in \mathbb{R}^{95}$$
 
 ### Mathematical Rationale:
-1. **Dimension Compression**: The 8-dimensional bottleneck forces the network to learn a low-dimensional manifold representing normal, legitimate entity interactions.
+1. **Dimension Compression**: The 16-dimensional bottleneck forces the network to learn a low-dimensional manifold representing normal, legitimate IT and OT entity interactions.
 2. **Reconstruction Loss Metric**: Mean Squared Error (MSE) measures the distance between input $\mathbf{x}$ and reconstructed output $\mathbf{\hat{x}}$:
-   $$\text{MSE}(\mathbf{x}, \mathbf{\hat{x}}) = \frac{1}{30} \sum_{i=1}^{30} (x_i - \hat{x}_i)^2$$
-3. **Discriminative Capability**: Higher reconstruction error directly indicates session patterns that fall outside the learned latent manifold. On benchmark evaluations, anomalous sequences exhibit a **4.66x higher MSE reconstruction loss** compared to normal baseline traffic (`0.32378` vs `0.06945`).
+   $$\text{MSE}(\mathbf{x}, \mathbf{\hat{x}}) = \frac{1}{95} \sum_{i=1}^{95} (x_i - \hat{x}_i)^2$$
+3. **Discriminative Capability**: Higher reconstruction error directly indicates session patterns that fall outside the learned latent manifold. On benchmark evaluations, anomalous sequences exhibit a **5.22x higher MSE reconstruction loss** compared to normal baseline traffic (`0.52576` vs `0.10071`).
 
 ---
 
