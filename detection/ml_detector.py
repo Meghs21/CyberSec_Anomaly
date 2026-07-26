@@ -44,6 +44,15 @@ class MLAnomalyDetector:
         
         mb_zscore = abs(mb - avg_mb) / std_mb
 
+        dur = float(event.get("session_duration", 300.0))
+        avg_dur = baseline_stats.get("avg_duration")
+        avg_dur = 300.0 if avg_dur is None else float(avg_dur)
+        
+        std_dur = baseline_stats.get("std_duration")
+        std_dur = 60.0 if std_dur is None else max(30.0, float(std_dur))
+        
+        dur_zscore = abs(dur - avg_dur) / std_dur
+
         known_devs = baseline_stats.get("known_devices", set())
         dev_unusual = 1.0 if (len(known_devs) > 0 and event.get("device_fingerprint") not in known_devs) else 0.0
 
@@ -58,6 +67,7 @@ class MLAnomalyDetector:
         return np.array([
             hour_zscore,
             mb_zscore,
+            dur_zscore,
             dev_unusual,
             loc_unusual,
             res_unusual,
@@ -88,5 +98,5 @@ class MLAnomalyDetector:
         else:
             raw_if = 0.0
 
-        z_dist = float(np.mean(feature_vector[:2]) + 1.2 * np.max(feature_vector[2:]))
+        z_dist = float(np.mean(feature_vector[:3]) + 1.2 * np.max(feature_vector[3:]))
         return 0.6 * raw_if + 0.4 * z_dist

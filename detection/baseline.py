@@ -21,6 +21,9 @@ class EntityBaselineProfiler:
             "mb_transferred": [],
             "avg_mb": None,
             "std_mb": None,
+            "durations": [],
+            "avg_duration": None,
+            "std_duration": None,
             "known_devices": set(),
             "known_locations": set(),
             "known_resources": set(),
@@ -49,6 +52,7 @@ class EntityBaselineProfiler:
         timestamp = event["timestamp"]
         hour = int(timestamp.split(" ")[1].split(":")[0])
         mb = float(event.get("mb_transferred", 0.0))
+        dur = float(event.get("session_duration", 300.0))
 
         prof["event_count"] += 1
         prof["known_devices"].add(event["device_fingerprint"])
@@ -60,15 +64,20 @@ class EntityBaselineProfiler:
             prof["std_hour"] = 2.0
             prof["avg_mb"] = float(mb)
             prof["std_mb"] = max(20.0, float(mb) * 0.5)
+            prof["avg_duration"] = float(dur)
+            prof["std_duration"] = max(60.0, float(dur) * 0.3)
         else:
             prof["avg_hour"] = 0.9 * prof["avg_hour"] + 0.1 * float(hour)
             prof["avg_mb"] = 0.9 * prof["avg_mb"] + 0.1 * float(mb)
+            prof["avg_duration"] = 0.9 * prof["avg_duration"] + 0.1 * float(dur)
 
             prof["hours"].append(hour)
             prof["mb_transferred"].append(mb)
+            prof["durations"].append(dur)
             if len(prof["hours"]) > 5:
                 prof["std_hour"] = float(np.std(prof["hours"][-30:])) + 0.5
                 prof["std_mb"] = float(np.std(prof["mb_transferred"][-30:])) + 10.0
+                prof["std_duration"] = float(np.std(prof["durations"][-30:])) + 30.0
 
         cmd_seq = str(event.get("command_sequence", "")).lower()
         auth_meth = str(event.get("auth_method", "")).lower()

@@ -30,7 +30,7 @@ class AnomalyClassifier:
         if rule_signals.get("brute_force_flag"):
             return "brute_force", "Point Anomaly"
 
-        if rule_signals.get("device_spoofing_flag") or feature_vec[2] > 0.5:
+        if rule_signals.get("device_spoofing_flag") or feature_vec[3] > 0.5:
             return "device_spoofing", "Contextual Anomaly"
 
         if rule_signals.get("lateral_movement_flag") or sequence_score > 0.65:
@@ -40,7 +40,7 @@ class AnomalyClassifier:
             return "low_and_slow_exfiltration", "Contextual Anomaly"
 
         # Check for insider_drift edge case (gradual legitimate expansion)
-        if 20.0 <= risk_score < 50.0 and (feature_vec[4] > 0.5 or baseline_stats.get("baseline_type") == "blended"):
+        if 20.0 <= risk_score < 50.0 and (feature_vec[5] > 0.5 or baseline_stats.get("baseline_type") == "blended"):
             return "insider_drift", "Behavioral Drift (Adapting)"
 
         if risk_score >= 60.0:

@@ -56,13 +56,19 @@ class ColdStartManager:
         avg_mb = (1.0 - weight) * cohort["avg_mb"] + weight * avg_mb_personal
         std_mb = (1.0 - weight) * cohort["std_mb"] + weight * max(10.0, personal_profile.get("std_mb", 20.0))
 
+        avg_dur_personal = personal_profile.get("avg_duration") if personal_profile.get("avg_duration") is not None else cohort["avg_duration"]
+        avg_dur = (1.0 - weight) * cohort["avg_duration"] + weight * avg_dur_personal
+        std_dur = (1.0 - weight) * cohort["std_duration"] + weight * max(60.0, personal_profile.get("std_duration", 300.0))
+
         effective = {
             "baseline_type": "personal" if weight >= 1.0 else "blended",
             "weight_personal": round(weight, 2),
             "avg_hour": float(avg_h),
             "std_hour": float(std_h),
             "avg_mb": float(avg_mb),
-            "std_mb": float(std_mb)
+            "std_mb": float(std_mb),
+            "avg_duration": float(avg_dur),
+            "std_duration": float(std_dur)
         }
 
         if personal_profile:
@@ -72,6 +78,7 @@ class ColdStartManager:
                 "last_seen_lon": personal_profile.get("last_seen_lon"),
                 "recent_failed_logins": personal_profile.get("recent_failed_logins", 0),
                 "known_devices": personal_profile.get("known_devices", set()),
+                "known_locations": personal_profile.get("known_locations", set()),
                 "known_resources": personal_profile.get("known_resources", set())
             })
 

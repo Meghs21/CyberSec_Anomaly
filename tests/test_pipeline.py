@@ -168,5 +168,48 @@ def test_recent_failed_logins_tracks_actual_failures():
         "recent_failed_logins did not reset to 0 after a successful auth event."
     )
 
+def test_duration_baseline_flows_through_pipeline():
+    """Regression test: session_duration must be tracked by the profiler, blended by
+    cold-start, and read correctly by the ML detector — catches silent key-name mismatches."""
+    profiler = EntityBaselineProfiler()
+    cold_start = ColdStartManager(min_events_threshold=10)
+    entity_id = "TEST_USER_DURATION"
+    entity_type = "user"
+
+    for i in range(15):
+        event = {
+            "entity_id": entity_id, "entity_type": entity_type,
+            "timestamp": f"2026-01-0{(i%9)+1} 10:00:00", "auth_method": "password",
+            "command_sequence": "login -> success", "device_fingerprint": "test-device",
+            "geo_location": "Test (0.0, 0.0)", "resource_accessed": "test_resource",
+            "session_duration": 900, "mb_transferred": 50.0
+        }
+        profiler.update_profile(event, inferred_risk_score=0.0)
+
+    personal_profile = profiler.get_profile(entity_id)
+    assert personal_profile["avg_duration"] is not None, "Profiler never tracked session_duration."
+    assert 800 < personal_profile["avg_duration"] < 1000, (
+        f"avg_duration should have converged near 900 (fed value), got {personal_profile['avg_duration']}"
+    )
+
+    effective_baseline = cold_start.get_effective_baseline(entity_id, entity_type, personal_profile)
+    assert "avg_duration" in effective_baseline, (
+        "avg_duration missing from blended cold-start baseline output — "
+        "likely the Part B propagation bug."
+    )
+    assert 800 < effective_baseline["avg_duration"] < 1000, (
+        f"Blended avg_duration should reflect learned personal behavior, got {effective_baseline['avg_duration']}"
+    )
+
+    ml_detector = MLAnomalyDetector()
+    ml_detector.is_fitted = True
+    test_event = {**event, "session_duration": 900}
+    feat_vec = ml_detector.extract_features(test_event, effective_baseline)
+    dur_z_index = 2
+    assert feat_vec[dur_z_index] < 1.0, (
+        f"dur_z should be near zero when event duration matches learned baseline, got {feat_vec[dur_z_index]} — "
+        "check for the mean_duration/avg_duration key mismatch bug."
+    )
+
 if __name__ == "__main__":
     pytest.main(["-v", __file__])
