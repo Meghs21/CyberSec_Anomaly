@@ -144,5 +144,29 @@ def test_three_way_mode_toggle():
         assert met["precision"] >= 25.0
         assert met["top1_alert_budget"]["precision_at_1pct"] >= 80.0
 
+def test_recent_failed_logins_tracks_actual_failures():
+    """Regression test: ensure recent_failed_logins responds to command_sequence failure markers,
+    not a dead comparison against auth_method."""
+    profiler = EntityBaselineProfiler()
+    entity_id = "TEST_USER_001"
+
+    failed_event = {
+        "entity_id": entity_id, "entity_type": "user", "timestamp": "2026-01-01 10:00:00",
+        "auth_method": "password", "command_sequence": "auth_attempt -> auth_failed",
+        "device_fingerprint": "test-device", "geo_location": "Test (0.0, 0.0)",
+        "resource_accessed": "test_resource", "mb_transferred": 0.0
+    }
+    profiler.update_profile(failed_event, inferred_risk_score=0.0)
+    assert profiler.get_profile(entity_id)["recent_failed_logins"] == 1, (
+        "recent_failed_logins did not increment on a failed-auth event — "
+        "likely the dead auth_method=='auth_failed' comparison bug."
+    )
+
+    success_event = {**failed_event, "timestamp": "2026-01-01 10:05:00", "command_sequence": "login -> success"}
+    profiler.update_profile(success_event, inferred_risk_score=0.0)
+    assert profiler.get_profile(entity_id)["recent_failed_logins"] == 0, (
+        "recent_failed_logins did not reset to 0 after a successful auth event."
+    )
+
 if __name__ == "__main__":
     pytest.main(["-v", __file__])

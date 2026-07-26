@@ -70,7 +70,11 @@ class EntityBaselineProfiler:
                 prof["std_hour"] = float(np.std(prof["hours"][-30:])) + 0.5
                 prof["std_mb"] = float(np.std(prof["mb_transferred"][-30:])) + 10.0
 
-        if event.get("auth_method") != "auth_failed":
+        cmd_seq = str(event.get("command_sequence", "")).lower()
+        auth_meth = str(event.get("auth_method", "")).lower()
+        is_failed_auth = "fail" in cmd_seq or "error" in cmd_seq or "failure" in auth_meth or "fail" in auth_meth
+
+        if not is_failed_auth:
             prof["last_seen_timestamp"] = timestamp
             # Parse lat/lon from geo_location string if formatted like "Location (lat, lon)"
             geo_str = event.get("geo_location", "")
