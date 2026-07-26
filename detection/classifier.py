@@ -8,6 +8,7 @@ Classifies detected anomalies into exact official categories:
 - device_spoofing
 - low_and_slow_exfiltration
 - insider_drift (Non-malicious concept drift edge case)
+- generic_behavioral_anomaly (Uncategorized high-risk behavioral anomaly)
 - normal
 Enforces strict label leakage prevention.
 """
@@ -16,6 +17,15 @@ class AnomalyClassifier:
     def classify_anomaly(self, event, rule_signals, feature_vec, sequence_score, baseline_stats, risk_score):
         """
         Classifies an event based strictly on observed signals and feature deviations.
+        Feature Vector Layout (7 dims):
+          [0]: hour_zscore
+          [1]: mb_zscore
+          [2]: dur_zscore
+          [3]: dev_unusual  (1.0 if new device fingerprint relative to baseline)
+          [4]: loc_unusual  (1.0 if new geo location relative to baseline)
+          [5]: res_unusual  (1.0 if new resource accessed relative to baseline)
+          [6]: auth_fail    (1.0 if failure detected in command sequence)
+
         Fails loudly if ground-truth label leakage is detected!
         """
         assert "label" not in event, "LABEL LEAKAGE DETECTED: Ground-truth 'label' field must be removed before classification!"
@@ -43,7 +53,8 @@ class AnomalyClassifier:
         if 20.0 <= risk_score < 50.0 and (feature_vec[5] > 0.5 or baseline_stats.get("baseline_type") == "blended"):
             return "insider_drift", "Behavioral Drift (Adapting)"
 
+        # Fallback for unclassified high-risk behavioral anomalies (prevents mislabeling as lateral movement)
         if risk_score >= 60.0:
-            return "lateral_movement", "Contextual Anomaly"
+            return "generic_behavioral_anomaly", "Behavioral Anomaly"
 
         return "normal", "Normal Baseline"
