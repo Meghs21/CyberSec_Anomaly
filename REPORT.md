@@ -117,6 +117,13 @@ While this prototype delivers the core ML detection engine, risk fusion, sequenc
 
 ---
 
-## 5. Production Readiness & Maturity Statement
+## 5. Known Limitations & Production Enhancements
+
+- **Exfiltration Command Proxy Detection**: The low-and-slow exfiltration rule currently relies partly on command-sequence text content specific to the synthetic data generator's labeling conventions. A production system would instead detect this pattern via rolling cumulative off-hours transfer volume per entity over a multi-day window, independent of any textual markers in the command sequence.
+- **Domain-Aware Resource Vocabulary**: The behavioral autoencoder's resource vocabulary is selected by domain frequency (Top 3 IT + Top 3 OT resources + UNKNOWN bucket). In large-scale enterprise deployments, per-cohort dynamic vocabulary mapping is recommended.
+
+---
+
+## 6. Production Readiness & Maturity Statement
 
 > *"This prototype implements the core behavioral detection engine. The architecture is designed so that production concerns such as model retraining, monitoring, feature stores, and deployment can be layered on without changing the detection pipeline."*

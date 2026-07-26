@@ -227,5 +227,42 @@ def test_sequence_fusion_single_source_of_truth():
     score_both_mode = fusion_both.fuse_sequence_scores(markov_score=0.8, autoencoder_score=0.1)
     assert abs(score_both_mode - 0.45) < 1e-6, "both mode should return the 50/50 blend"
 
+def test_lateral_movement_does_not_falsely_flag_normal_ot_access():
+    """Regression test: an OT-domain entity accessing its own normal OT resource
+    (already in known_resources) must NOT trigger lateral_movement_flag.
+    Catches the operator-precedence bug where 'Honeywell_Forge'/'SCADA' checks
+    were accidentally ungated from the user_domain=='IT' condition."""
+    from detection.rule_engine import RuleAssistEngine
+    engine = RuleAssistEngine()
+
+    # OT operator accessing a resource ALREADY in their known/normal resource set
+    ot_event = {
+        "entity_id": "OT_TEST_USER", "entity_type": "user", "domain": "OT",
+        "resource_accessed": "SCADA_HMI_Workstation_01", "auth_method": "certificate",
+        "timestamp": "2026-01-01 10:00:00", "command_sequence": "modbus_read -> log_telemetry",
+        "device_fingerprint": "test-device", "source_ip": "10.1.1.1",
+        "geo_location": "Test (0.0, 0.0)", "mb_transferred": 5.0
+    }
+    ot_baseline = {
+        "known_resources": {"SCADA_HMI_Workstation_01", "BMS_Controller_HVAC_01"},
+        "known_devices": {"test-device"}, "event_count": 20
+    }
+    signals = engine.evaluate_rules(ot_event, ot_baseline)
+    assert signals["lateral_movement_flag"] is False, (
+        "OT entity accessing its own known, normal SCADA resource was falsely flagged "
+        "as lateral movement — likely the operator-precedence bug."
+    )
+
+    # IT entity accessing an OT resource it has never touched — SHOULD be flagged
+    it_event = {**ot_event, "entity_id": "IT_TEST_USER", "domain": "IT", "resource_accessed": "SCADA_HMI_Workstation_01"}
+    it_baseline = {
+        "known_resources": {"Corporate_VPN", "Active_Directory"},  # never touched SCADA before
+        "known_devices": {"test-device"}, "event_count": 20
+    }
+    signals_it = engine.evaluate_rules(it_event, it_baseline)
+    assert signals_it["lateral_movement_flag"] is True, (
+        "IT entity accessing an unfamiliar SCADA/OT resource should be flagged as lateral movement."
+    )
+
 if __name__ == "__main__":
     pytest.main(["-v", __file__])

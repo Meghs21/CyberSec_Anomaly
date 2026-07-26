@@ -104,7 +104,7 @@ class RuleAssistEngine:
         known_res = baseline_stats.get("known_resources", set())
         curr_res = event.get("resource_accessed", "")
         user_domain = event.get("domain", "IT")
-        if (len(known_res) > 0 and curr_res not in known_res) or (user_domain == "IT" and "BMS" in curr_res or "Honeywell_Forge" in curr_res or "SCADA" in curr_res):
+        if (len(known_res) > 0 and curr_res not in known_res) or (user_domain == "IT" and ("BMS" in curr_res or "Honeywell_Forge" in curr_res or "SCADA" in curr_res)):
             rule_signals["lateral_movement_flag"] = True
 
         # 5. Low-and-Slow Exfiltration & Off-Hours
