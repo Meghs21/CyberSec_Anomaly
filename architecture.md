@@ -30,7 +30,7 @@ flowchart TD
         
         C --> F[Rule Assist Engine\nGeo-Velocity & Brute Force Rules]
         C --> G[Cold-Start Manager\nCohort Priors + Personal Blending]
-        C --> H[Concept Drift Adapter\nEWMA + Anti-Poisoning Filter]
+        C --> H[ConceptDriftAdapter (detection/drift.py)\nSingle-Source-of-Truth EWMA + Anti-Poisoning Filter]
     end
 
     subgraph Fusion, Classification & Explainability
