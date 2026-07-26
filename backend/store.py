@@ -103,7 +103,6 @@ class DataStore:
         import pickle
         cache_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "models_cache.pkl"))
         
-        profiler = EntityBaselineProfiler()
         cold_start = ColdStartManager(min_events_threshold=10)
         rule_engine = RuleAssistEngine()
         risk_fusion = RiskFusionEngine(base_alert_threshold=self.current_threshold)
@@ -111,7 +110,10 @@ class DataStore:
         explainer = ExplainabilityEngine()
 
         events_raw = self.raw_df.to_dict("records")
-        normal_train_split = [e for e in events_raw[:300] if e.get("label", "normal") == "normal"]
+        TRAINING_SPLIT_SIZE = 300
+        training_events = events_raw[:TRAINING_SPLIT_SIZE]
+        live_events = events_raw[TRAINING_SPLIT_SIZE:]
+        normal_train_split = [e for e in training_events if e.get("label", "normal") == "normal"]
 
         # Attempt to load pre-analyzed events & pre-trained models from disk for sub-1s cold boot
         if os.path.exists(cache_path):
@@ -132,8 +134,10 @@ class DataStore:
         sequence_detector = SequenceMarkovDetector(min_cohort_events=10)
         autoencoder_detector = SequenceAutoencoderDetector()
 
-        print("[MODEL PERSISTENCE] Fitting models baseline on normal split...")
-        ml_detector.fit_normal_baseline(events_raw[:300], profiler)
+        # Fit all models using a SEPARATE, disposable fitting_profiler instance for training pass
+        fitting_profiler = EntityBaselineProfiler()
+        print(f"[MODEL PERSISTENCE] Fitting models baseline on N={TRAINING_SPLIT_SIZE} training split using isolated profiler...")
+        ml_detector.fit_normal_baseline(training_events, fitting_profiler)
         sequence_detector.fit_normal_baseline(normal_train_split)
         autoencoder_detector.fit_normal_baseline(normal_train_split)
 
@@ -149,11 +153,13 @@ class DataStore:
         except Exception as e:
             print(f"[MODEL PERSISTENCE] Could not save model cache: {e}")
 
+        # Main live pipeline loop starts with a FRESH profiler and processes ONLY held-out live_events
+        profiler = EntityBaselineProfiler()
         self.analyzed_events = []
         self.ground_truth_labels = {}
         entity_histories = {}
 
-        for idx, ev in enumerate(events_raw):
+        for idx, ev in enumerate(live_events):
             alert_id = f"ALT-{idx+1:04d}"
             
             true_label = str(ev.get("label", "normal"))

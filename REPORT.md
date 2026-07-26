@@ -49,6 +49,8 @@ The system enforces strict compliance with the **11-field official telemetry sch
 
 *Documented Extensions*: The dataset presents the required 11-field official schema exactly in primary column order, extended with 3 additional engineered trailing fields (`role`, `domain`, `mb_transferred`) used internally by the detection pipeline for IT/OT domain tagging and exfiltration-volume analysis — these are supplementary extensions and not a deviation from the required schema.
 
+*Held-Out Evaluation Methodology*: Models are fit on an initial training split (first $N=300$ events chronologically) using an isolated, disposable profiler instance (`fitting_profiler`); all reported evaluation metrics and dashboard views are computed exclusively on the remaining held-out live events ($N=1,302$), which the models never trained on.
+
 ---
 
 ## 2. Sequence Intelligence Subsystem (`detection/sequence/`)
